@@ -35,7 +35,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/havemaaler" element={<GardenSizer />} />
             <Route path="/vanding" element={<WateringPlan />} />
-            <Route path="/ai" element={<Placeholder active="ai" eyebrow="Plantepleje AI" title="Spørg om alt. Den kender din have." description="Få råd om beskæring, gødning, sygdomme og daglig pleje. Bygges i fase 6 med Lovable AI." />} />
+            <Route path="/ai" element={<PlantCareAI />} />
             <Route path="/konto" element={<Placeholder active="account" eyebrow="Min konto" title="Din have, dine ordrer." description="Samlet overblik over alt du har gang i. Login fungerer allerede — dashboard bygges i fase 7." />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
