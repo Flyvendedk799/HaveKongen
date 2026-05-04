@@ -1,1 +1,10 @@
 project_id = "fpfndbikyvnsuvalqjls"
+
+[functions.get-ortofoto-config]
+verify_jwt = false
+
+[functions.get-matrikel]
+verify_jwt = false
+
+[functions.segment-lawn]
+verify_jwt = false
