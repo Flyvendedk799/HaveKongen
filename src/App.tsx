@@ -15,6 +15,7 @@ import ResetPassword from "./pages/ResetPassword.tsx";
 import GardenSizer from "./pages/GardenSizer.tsx";
 import WateringPlan from "./pages/WateringPlan.tsx";
 import PlantCareAI from "./pages/PlantCareAI.tsx";
+import Account from "./pages/Account.tsx";
 
 const queryClient = new QueryClient();
 
@@ -36,7 +37,7 @@ const App = () => (
             <Route path="/havemaaler" element={<GardenSizer />} />
             <Route path="/vanding" element={<WateringPlan />} />
             <Route path="/ai" element={<PlantCareAI />} />
-            <Route path="/konto" element={<Placeholder active="account" eyebrow="Min konto" title="Din have, dine ordrer." description="Samlet overblik over alt du har gang i. Login fungerer allerede — dashboard bygges i fase 7." />} />
+            <Route path="/konto" element={<Account />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
