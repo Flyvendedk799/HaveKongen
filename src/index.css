@@ -1,12 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Havelandet design tokens + base — must load Google fonts */
+/* @import rules MUST come before any other rules (CSS spec) */
 @import url('https://fonts.googleapis.com/css2?family=Tenor+Sans&family=Inter+Tight:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 @import './styles/tokens.css';
 @import './styles/landing.css';
 @import './styles/app.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* shadcn semantic tokens (used by ui/* components) — derived from Havelandet palette */
 @layer base {
