@@ -15,6 +15,7 @@ import ResetPassword from "./pages/ResetPassword.tsx";
 import GardenSizer from "./pages/GardenSizer.tsx";
 import WateringPlan from "./pages/WateringPlan.tsx";
 import PlantCareAI from "./pages/PlantCareAI.tsx";
+import Account from "./pages/Account.tsx";
 
 const queryClient = new QueryClient();
 
