@@ -17,6 +17,7 @@ import WateringPlan from "./pages/WateringPlan.tsx";
 import PlantCareAI from "./pages/PlantCareAI.tsx";
 import Account from "./pages/Account.tsx";
 import { MobileTabBar } from "./components/layout/MobileTabBar.tsx";
+import { ScrollToTop } from "./components/layout/ScrollToTop.tsx";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <ScrollToTop />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/webshop" element={<Webshop />} />
