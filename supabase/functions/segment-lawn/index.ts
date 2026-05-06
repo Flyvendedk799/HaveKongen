@@ -121,25 +121,47 @@ Return STRICT JSON only:
 - Coordinates are integer pixels in [0,${width}] x [0,${height}].
 - confidence: how sure you are this is the true lawn boundary.`;
 
-    const aiRes = await fetch(LOVABLE_API, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
-          ],
-        }],
-      }),
-    });
-    if (!aiRes.ok) {
-      const t = await aiRes.text();
-      const status = aiRes.status === 429 || aiRes.status === 402 ? aiRes.status : 502;
-      return new Response(JSON.stringify({ error: "ai failed", status: aiRes.status, detail: t.slice(0, 400) }), {
-        status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const models = ["google/gemini-2.5-flash", "google/gemini-2.5-pro", "google/gemini-2.5-flash-lite"];
+    let aiRes: Response | null = null;
+    let lastErr = "";
+    let lastStatus = 0;
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await fetch(LOVABLE_API, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
+                ],
+              }],
+            }),
+          });
+          if (r.ok) { aiRes = r; break; }
+          lastStatus = r.status;
+          lastErr = (await r.text()).slice(0, 300);
+          if (r.status === 429 || r.status === 402) {
+            return new Response(JSON.stringify({ error: "ai failed", status: r.status, detail: lastErr }), {
+              status: r.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          // 5xx -> backoff and retry
+          await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
+        } catch (e) {
+          lastErr = String(e);
+          await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
+        }
+      }
+      if (aiRes) break;
+    }
+    if (!aiRes) {
+      return new Response(JSON.stringify({ error: "ai upstream unavailable", status: lastStatus, detail: lastErr, fallback: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const aiJson = await aiRes.json();
