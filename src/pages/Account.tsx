@@ -87,6 +87,25 @@ export default function Account() {
     else toast.success("Profil opdateret.");
   }
 
+  async function uploadAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f || !user) return;
+    if (f.size > 4 * 1024 * 1024) { toast.error("Billede er for stort (max 4 MB)."); return; }
+    setUploadingAvatar(true);
+    const ext = f.name.split(".").pop() || "jpg";
+    const path = `${user.id}/avatar-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from("avatars").upload(path, f, { contentType: f.type, upsert: true });
+    if (upErr) { toast.error(upErr.message); setUploadingAvatar(false); return; }
+    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+    const url = pub.publicUrl;
+    const { error: updErr } = await supabase.from("profiles").update({ avatar_url: url }).eq("id", user.id);
+    if (updErr) { toast.error(updErr.message); setUploadingAvatar(false); return; }
+    setProfile((p) => ({ ...p, avatar_url: url }));
+    setUploadingAvatar(false);
+    toast.success("Profilbillede opdateret.");
+    e.target.value = "";
+  }
+
   async function logout() {
     await signOut();
     nav("/");
