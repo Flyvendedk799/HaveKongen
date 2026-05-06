@@ -23,6 +23,8 @@ import { RouteTransition } from "./components/layout/RouteTransition.tsx";
 import { MiniCart } from "./components/MiniCart.tsx";
 import Checkout from "./pages/Checkout.tsx";
 import OrderConfirmation from "./pages/OrderConfirmation.tsx";
+import Admin from "./pages/Admin.tsx";
+import { OnboardingWizard } from "./components/OnboardingWizard.tsx";
 
 const queryClient = new QueryClient();
 
