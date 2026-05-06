@@ -48,6 +48,40 @@ function makeTimings(mobile: boolean) {
   };
 }
 
+// Convert lng/lat to XYZ tile coords (Web Mercator)
+function lngLatToTile(lng: number, lat: number, z: number) {
+  const n = Math.pow(2, z);
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
+  );
+  return { x, y };
+}
+
+// Pre-fetch a 3x3 grid of ortofoto tiles at z17 + z18 around the destination
+// so they're warm in the HTTP cache before the cinematic descent reaches them.
+function prewarmOrtoTiles(template: string | null, center: [number, number]) {
+  if (!template) return;
+  const [lng, lat] = center;
+  for (const z of [17, 18]) {
+    const { x, y } = lngLatToTile(lng, lat, z);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const url = template
+          .replace("{z}", String(z))
+          .replace("{x}", String(x + dx))
+          .replace("{y}", String(y + dy));
+        // bbox-templated WMS URLs won't match — best-effort only
+        if (url.includes("{")) continue;
+        const img = new Image();
+        img.decoding = "async";
+        img.src = url;
+      }
+    }
+  }
+}
+
 export default function PinpointSequence({ address, center, mapboxToken, ortoWmsTemplate, onDone }: Props) {
   const [stage, setStage] = useState<Stage>("intro");
   const [calmDown, setCalmDown] = useState(false); // start hiding HUD/atmosphere before map fade
