@@ -14,6 +14,9 @@ export type CartItem = {
 
 type CartState = {
   items: CartItem[];
+  isOpen: boolean;
+  openCart: () => void;
+  closeCart: () => void;
   add: (item: CartItem) => void;
   remove: (productId: string, variantId?: string) => void;
   setQty: (productId: string, qty: number, variantId?: string) => void;
@@ -26,15 +29,18 @@ export const useCart = create<CartState>()(
   persist(
     (set, get) => ({
       items: [],
+      isOpen: false,
+      openCart: () => set({ isOpen: true }),
+      closeCart: () => set({ isOpen: false }),
       add: (item) =>
         set((s) => {
           const idx = s.items.findIndex((i) => i.productId === item.productId && i.variantId === item.variantId);
           if (idx >= 0) {
             const copy = [...s.items];
             copy[idx] = { ...copy[idx], qty: copy[idx].qty + item.qty };
-            return { items: copy };
+            return { items: copy, isOpen: true };
           }
-          return { items: [...s.items, item] };
+          return { items: [...s.items, item], isOpen: true };
         }),
       remove: (productId, variantId) =>
         set((s) => ({ items: s.items.filter((i) => !(i.productId === productId && i.variantId === variantId)) })),
@@ -48,7 +54,10 @@ export const useCart = create<CartState>()(
       total: () => get().items.reduce((sum, i) => sum + i.unitPriceDkk * i.qty, 0),
       count: () => get().items.reduce((sum, i) => sum + i.qty, 0),
     }),
-    { name: "havelandet-cart" }
+    {
+      name: "havelandet-cart",
+      partialize: (s) => ({ items: s.items }) as any,
+    }
   )
 );
 
