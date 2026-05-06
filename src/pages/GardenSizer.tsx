@@ -60,6 +60,7 @@ export default function GardenSizer() {
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [snapIndicator, setSnapIndicator] = useState<LngLat | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pinpointing, setPinpointing] = useState<{ name: string; center: LngLat } | null>(null);
 
   // History (undo/redo)
   type Snap = { main: Ring; mainClosed: boolean; exclusions: Ring[] };
