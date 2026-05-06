@@ -559,8 +559,9 @@ export default function GardenSizer() {
         body: { click, cropMeters: 90, width: 768, height: 768 },
       });
       if (error || !data?.polygon) {
-        const msg = (error as any)?.message || "";
-        toast.error(msg.includes("402") ? "AI-kreditter brugt op" : msg.includes("429") ? "Travl gateway — prøv igen om lidt" : "AI-opmåling fejlede");
+        const msg = (error as any)?.message || (data as any)?.error || "";
+        if ((data as any)?.fallback) toast.error("AI-tjenesten er midlertidigt utilgængelig — prøv igen om lidt eller tegn manuelt");
+        else toast.error(msg.includes("402") ? "AI-kreditter brugt op" : msg.includes("429") ? "Travl gateway — prøv igen om lidt" : "AI-opmåling fejlede");
         return;
       }
       const ring = data.polygon as LngLat[];
