@@ -35,14 +35,14 @@ export default function Account() {
     if (!user) return;
     (async () => {
       const [{ data: p }, { data: g }, { data: o }, { data: d }, { count }, { data: w }] = await Promise.all([
-        supabase.from("profiles").select("name, address, postal_code").eq("id", user.id).maybeSingle(),
+        supabase.from("profiles").select("name, address, postal_code, avatar_url").eq("id", user.id).maybeSingle(),
         supabase.from("gardens").select("id, name, area_m2, address, thumbnail_url").order("created_at", { ascending: false }),
         supabase.from("orders").select("id, created_at, total_dkk, status").order("created_at", { ascending: false }).limit(5),
         supabase.from("devices").select("id, name, kind, status, battery").order("created_at", { ascending: false }),
         supabase.from("user_plants").select("id", { count: "exact", head: true }),
         supabase.from("wishlists").select("product_id"),
       ]);
-      if (p) setProfile({ name: p.name ?? "", address: p.address ?? "", postal_code: p.postal_code ?? "" });
+      if (p) setProfile({ name: p.name ?? "", address: p.address ?? "", postal_code: p.postal_code ?? "", avatar_url: (p as any).avatar_url ?? null });
       const gardensList = g ?? [];
       setGardens(gardensList);
       setOrders(o ?? []);
