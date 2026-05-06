@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
+import { useIsMobile } from "@/hooks/use-mobile";
 import "./pinpoint.css";
 
 type LngLat = [number, number];
 
-type Stage = "intro" | "globe" | "descent" | "drop" | "impact" | "settle" | "handoff";
+type Stage =
+  | "intro"
+  | "globe"
+  | "approach"
+  | "descent"
+  | "drop"
+  | "impact"
+  | "settle"
+  | "handoff";
 
 type Props = {
   address: string;
@@ -16,19 +25,39 @@ type Props = {
 
 const STEPS: { id: string; label: string; stages: Stage[] }[] = [
   { id: "find",  label: "Finder adresse",   stages: ["intro", "globe"] },
-  { id: "orto",  label: "Henter ortofoto",  stages: ["descent"] },
+  { id: "orto",  label: "Henter ortofoto",  stages: ["approach", "descent"] },
   { id: "place", label: "Placerer pin",     stages: ["drop", "impact"] },
   { id: "ready", label: "Klar",             stages: ["settle", "handoff"] },
 ];
 
+// Centralised timings — tweak in one place. Mobile gets a small shave (~15%).
+function makeTimings(mobile: boolean) {
+  const k = mobile ? 0.85 : 1;
+  const r = (n: number) => Math.round(n * k);
+  return {
+    introHold:    r(600),
+    globeDur:     r(900),
+    approachDur:  r(1800),
+    descentDur:   r(1400),
+    // pin drop overlaps tail of descent
+    dropOffset:   r(-200), // start 200ms before descent ends
+    dropDur:      r(750),
+    impactDur:    r(320),
+    settleDur:    r(700),
+    handoffDur:   r(650),
+  };
+}
+
 export default function PinpointSequence({ address, center, mapboxToken, ortoWmsTemplate, onDone }: Props) {
   const [stage, setStage] = useState<Stage>("intro");
+  const [calmDown, setCalmDown] = useState(false); // start hiding HUD/atmosphere before map fade
   const [fadingOut, setFadingOut] = useState(false);
   const [pinPx, setPinPx] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const timersRef = useRef<number[]>([]);
   const finishedRef = useRef(false);
+  const mobile = useIsMobile();
 
   const reduced = typeof window !== "undefined"
     && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -43,8 +72,11 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     const cam = map
       ? { center: [map.getCenter().lng, map.getCenter().lat] as LngLat, zoom: map.getZoom() }
       : { center, zoom: 19 };
-    setFadingOut(true);
-    window.setTimeout(() => onDone(cam), 280);
+    // Fade HUD/atmosphere first, then the whole stage — gives the impression
+    // step 2's map is the same map we were just looking at.
+    setCalmDown(true);
+    window.setTimeout(() => setFadingOut(true), 220);
+    window.setTimeout(() => onDone(cam), 220 + 600);
   }
 
   // Build dual-source style: satellite (global) + ortofoto (DK), zoom-cross-faded
@@ -70,6 +102,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
             "interpolate", ["linear"], ["zoom"],
             14, 1, 17, 0,
           ],
+          "raster-fade-duration": 600,
         },
       },
     ];
@@ -89,6 +122,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
             "interpolate", ["linear"], ["zoom"],
             14, 0, 17, 1,
           ],
+          "raster-fade-duration": 600,
         },
       });
     }
@@ -104,12 +138,13 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
       container: containerRef.current,
       style: buildStyle(),
       center,
-      zoom: 4,
+      zoom: 3.6,
       pitch: 0,
       bearing: 0,
       interactive: false,
       attributionControl: false,
       antialias: true,
+      fadeDuration: 600,
     });
     mapRef.current = map;
 
@@ -140,58 +175,91 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
   useEffect(() => {
     if (!mapRef.current) return;
     const map = mapRef.current;
+    const T = makeTimings(mobile);
 
     if (reduced) {
-      // Fast path: jump to target, brief settle, finish
       map.once("load", () => {
         map.jumpTo({ center, zoom: 18.5, pitch: 0, bearing: 0 });
         setStage("handoff");
-        at(450, finish);
+        at(900, finish);
       });
       return;
     }
 
+    // easeInOutCubic — smoother both ends than easeOutCubic
+    const easeInOutCubic = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
     map.once("load", () => {
-      // INTRO
+      // INTRO — fade map in, HUD slides in
       setStage("intro");
-      at(180, () => {
-        // GLOBE
+
+      at(T.introHold, () => {
+        // GLOBE — gentle drift + slight zoom
         setStage("globe");
-        // gentle bearing drift
-        map.easeTo({ bearing: 8, duration: 320, easing: t => t });
-        at(320, () => {
-          // DESCENT
-          setStage("descent");
+        map.easeTo({
+          zoom: 6.5,
+          bearing: 6,
+          duration: T.globeDur,
+          easing: easeInOutCubic,
+        });
+
+        at(T.globeDur, () => {
+          // APPROACH — long flyTo from globe to neighbourhood
+          setStage("approach");
           map.flyTo({
             center,
-            zoom: 18.5,
-            pitch: 58,
-            bearing: -10,
-            duration: 1500,
-            curve: 1.7,
-            speed: 1.2,
+            zoom: 15,
+            pitch: 30,
+            bearing: -6,
+            duration: T.approachDur,
+            curve: 1.42,
+            speed: 0.9,
             essential: true,
-            easing: t => 1 - Math.pow(1 - t, 3),
+            easing: easeInOutCubic,
           });
-          // Trigger DROP near end of flyTo
-          at(1100, () => setStage("drop"));
-          at(1100 + 450, () => {
-            setStage("impact");
-            if ((navigator as any).vibrate) (navigator as any).vibrate(12);
-          });
-          at(1100 + 450 + 320, () => {
-            setStage("settle");
-            map.easeTo({ pitch: 0, bearing: 0, duration: 280 });
-          });
-          at(1100 + 450 + 320 + 280, () => {
-            setStage("handoff");
-            finish();
+
+          at(T.approachDur, () => {
+            // DESCENT — slow easeTo into the property
+            setStage("descent");
+            map.easeTo({
+              center,
+              zoom: 18.7,
+              pitch: 58,
+              bearing: -10,
+              duration: T.descentDur,
+              easing: easeInOutCubic,
+            });
+
+            // Pin drops late in the descent — overlapping
+            const dropStart = Math.max(0, T.descentDur + T.dropOffset);
+            at(dropStart, () => setStage("drop"));
+
+            at(dropStart + T.dropDur, () => {
+              setStage("impact");
+              if ((navigator as any).vibrate) (navigator as any).vibrate(10);
+            });
+
+            at(dropStart + T.dropDur + T.impactDur, () => {
+              setStage("settle");
+              map.easeTo({
+                pitch: 0,
+                bearing: 0,
+                duration: T.settleDur,
+                easing: easeInOutCubic,
+              });
+            });
+
+            at(dropStart + T.dropDur + T.impactDur + T.settleDur, () => {
+              setStage("handoff");
+              finish();
+            });
           });
         });
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mobile]);
 
   // Esc to skip
   useEffect(() => {
@@ -209,7 +277,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
 
   return (
     <div
-      className={`pp-stage ${shake ? "shake" : ""} ${fadingOut ? "fading-out" : ""}`}
+      className={`pp-stage ${shake ? "shake" : ""} ${calmDown ? "calm-down" : ""} ${fadingOut ? "fading-out" : ""}`}
       data-stage={stage}
     >
       <div ref={containerRef} className="pp-map" />
@@ -263,7 +331,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
                   className="pp-spark"
                   style={{
                     ["--a" as any]: `${(i / 14) * 360}deg`,
-                    ["--d" as any]: `${(i % 5) * 0.03}s`,
+                    ["--d" as any]: `${(i % 5) * 0.04}s`,
                     ["--dist" as any]: `${70 + (i % 3) * 30}px`,
                   } as React.CSSProperties}
                 />
