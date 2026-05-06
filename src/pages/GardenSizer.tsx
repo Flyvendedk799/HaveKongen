@@ -99,10 +99,11 @@ export default function GardenSizer() {
   }, [query, mapboxToken]);
 
   function chooseAddress(s: Suggestion) {
-    setChosen({ name: s.place_name, center: s.center });
-    setQuery(s.place_name); setOpen(false); setStep(2);
+    setQuery(s.place_name); setOpen(false);
     setMain([]); setMainClosed(false); setExclusions([]); setCurrentExclusion([]);
     setMatrikel(null);
+    // Trigger cinematic pinpoint; finalises into step 2 in onDone
+    setPinpointing({ name: s.place_name, center: s.center });
   }
 
   // ----- Build style for current imagery choice -----
