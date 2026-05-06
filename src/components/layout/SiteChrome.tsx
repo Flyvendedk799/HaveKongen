@@ -1,14 +1,55 @@
 import { Link } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
+import { useCart } from "@/lib/cart";
+import { useCommandPalette } from "@/components/CommandPalette";
+import { ShoppingCart, Search, User as UserIcon } from "lucide-react";
+
+function Logo() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 22V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M12 14C8 14 5 11 5 7C9 7 12 10 12 14Z" fill="currentColor" opacity="0.85" />
+      <path d="M12 12C16 12 19 9 19 5C15 5 12 8 12 12Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function AccountButton({ dark = false }: { dark?: boolean }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (user) {
+    const name = (user.user_metadata?.name as string | undefined) || user.email?.split("@")[0] || "Konto";
+    const initial = name.charAt(0).toUpperCase();
+    return (
+      <Link to="/konto" className="nav-account" aria-label={`Min konto (${name})`}>
+        <span className="nav-avatar">{initial}</span>
+        <span className="nav-account-name">{name}</span>
+      </Link>
+    );
+  }
+  return (
+    <Link to="/login" className={`btn ${dark ? "btn-primary" : "btn-primary"} btn-sm`}>
+      <UserIcon size={14} /> Log ind
+    </Link>
+  );
+}
+
+function CartButton() {
+  const count = useCart((s) => s.count());
+  return (
+    <Link to="/cart" className="nav-cart" aria-label={`Indkøbskurv${count ? `, ${count} varer` : ""}`}>
+      <ShoppingCart size={16} />
+      {count > 0 && <span className="nav-cart-badge">{count}</span>}
+    </Link>
+  );
+}
 
 export function SiteNav({ onDark = true }: { onDark?: boolean }) {
+  const openPalette = useCommandPalette((s) => s.open);
   return (
     <nav className={`nav ${onDark ? "on-dark" : ""}`} id="nav">
       <Link className="nav-logo" to="/">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 22V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <path d="M12 14C8 14 5 11 5 7C9 7 12 10 12 14Z" fill="currentColor" opacity="0.85" />
-          <path d="M12 12C16 12 19 9 19 5C15 5 12 8 12 12Z" fill="currentColor" />
-        </svg>
+        <Logo />
         Havelandet
       </Link>
       <div className="nav-links">
@@ -16,34 +57,30 @@ export function SiteNav({ onDark = true }: { onDark?: boolean }) {
         <Link to="/havemaaler">Havemåler</Link>
         <Link to="/vanding">Vandingsplan</Link>
         <Link to="/ai">Plantepleje AI</Link>
-        <Link to="/konto">Min konto</Link>
       </div>
       <div className="nav-actions">
-        <button className="btn btn-ghost btn-sm" aria-label="Søg">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.4" />
-            <path d="M9.5 9.5l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-          Søg
+        <button className="btn btn-ghost btn-sm" aria-label="Søg" onClick={openPalette}>
+          <Search size={14} /> Søg
+          <kbd className="nav-kbd">⌘K</kbd>
         </button>
-        <Link to="/konto" className="btn btn-primary btn-sm">Min konto</Link>
+        <CartButton />
+        <AccountButton dark />
       </div>
     </nav>
   );
 }
 
 export function AppNav({ active }: { active?: string }) {
+  const openPalette = useCommandPalette((s) => s.open);
   const link = (path: string, label: string, key: string) => (
-    <Link to={path} className={active === key ? "active" : undefined}>{label}</Link>
+    <Link to={path} className={active === key ? "active" : undefined}>
+      {label}
+    </Link>
   );
   return (
     <nav className="app-nav">
       <Link className="nav-logo" to="/">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-          <path d="M12 22V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <path d="M12 14C8 14 5 11 5 7C9 7 12 10 12 14Z" fill="currentColor" opacity="0.85" />
-          <path d="M12 12C16 12 19 9 19 5C15 5 12 8 12 12Z" fill="currentColor" />
-        </svg>
+        <Logo />
         Havelandet
       </Link>
       <div className="nav-links">
@@ -51,10 +88,14 @@ export function AppNav({ active }: { active?: string }) {
         {link("/havemaaler", "Havemåler", "sizer")}
         {link("/vanding", "Vandingsplan", "water")}
         {link("/ai", "Plantepleje AI", "ai")}
-        {link("/konto", "Min konto", "account")}
       </div>
       <div className="nav-actions">
-        <Link className="btn btn-primary btn-sm" to="/konto">Min konto</Link>
+        <button className="btn btn-ghost btn-sm" aria-label="Søg" onClick={openPalette}>
+          <Search size={14} /> Søg
+          <kbd className="nav-kbd">⌘K</kbd>
+        </button>
+        <CartButton />
+        <AccountButton />
       </div>
     </nav>
   );
@@ -66,7 +107,9 @@ export function SiteFooter() {
       <div className="container">
         <div className="footer-grid">
           <div>
-            <div className="footer-mark">Havelandet<em>.</em></div>
+            <div className="footer-mark">
+              Havelandet<em>.</em>
+            </div>
             <p style={{ color: "rgba(237,232,223,0.6)", fontSize: 14, maxWidth: 320, lineHeight: 1.6 }}>
               Lev din have. Fra det første frø, til årets sidste blad.
             </p>
