@@ -52,7 +52,18 @@ export default function GardenSizer() {
 
   const [matrikel, setMatrikel] = useState<Ring | null>(null);
   const [wandLoading, setWandLoading] = useState(false);
+  const [wandOp, setWandOp] = useState<WandOp>("replace");
+  const [wandConfidence, setWandConfidence] = useState<number | null>(null);
+  const [wandBbox, setWandBbox] = useState<[number, number, number, number] | null>(null);
+  const [wandHoverPos, setWandHoverPos] = useState<LngLat | null>(null);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [snapIndicator, setSnapIndicator] = useState<LngLat | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // History (undo/redo)
+  type Snap = { main: Ring; mainClosed: boolean; exclusions: Ring[] };
+  const historyRef = useRef<{ past: Snap[]; future: Snap[] }>({ past: [], future: [] });
+  const skipHistoryRef = useRef(false);
 
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
