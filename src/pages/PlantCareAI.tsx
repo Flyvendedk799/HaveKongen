@@ -3,10 +3,11 @@ import ReactMarkdown from "react-markdown";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type Msg = { role: "user" | "assistant"; content: string | ContentPart[] };
 type Conv = { id: string; title: string; updated_at: string };
 
 const STARTERS = [
