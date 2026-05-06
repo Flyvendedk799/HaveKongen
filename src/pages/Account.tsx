@@ -42,10 +42,23 @@ export default function Account() {
         supabase.from("wishlists").select("product_id"),
       ]);
       if (p) setProfile({ name: p.name ?? "", address: p.address ?? "", postal_code: p.postal_code ?? "" });
-      setGardens(g ?? []);
+      const gardensList = g ?? [];
+      setGardens(gardensList);
       setOrders(o ?? []);
       setDevices(d ?? []);
       setPlantCount(count ?? 0);
+      // Auto-pick active garden if none chosen
+      if (gardensList.length && !activeGardenId) setActive(gardensList[0].id);
+      // Zone counts
+      if (gardensList.length) {
+        const { data: zs } = await supabase
+          .from("garden_zones")
+          .select("garden_id")
+          .in("garden_id", gardensList.map((x: any) => x.id));
+        const counts: Record<string, number> = {};
+        (zs ?? []).forEach((z: any) => { counts[z.garden_id] = (counts[z.garden_id] || 0) + 1; });
+        setZoneCounts(counts);
+      }
       const ids = (w ?? []).map((r: any) => r.product_id);
       if (ids.length) {
         const { data: prods } = await supabase
