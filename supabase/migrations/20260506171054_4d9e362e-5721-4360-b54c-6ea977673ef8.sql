@@ -1,0 +1,1 @@
+revoke execute on function public.write_audit() from public, anon, authenticated;

@@ -41,6 +41,8 @@ const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminMedia = lazy(() => import("./pages/admin/AdminMedia.tsx"));
 const AdminContent = lazy(() => import("./pages/admin/AdminContent.tsx"));
 const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications.tsx"));
+const AdminAnalytics = lazy(() => import("./pages/admin/AdminAnalytics.tsx"));
+const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
 const AdminStub = lazy(() => import("./pages/admin/AdminStub.tsx").then((m) => ({ default: m.AdminStub })));
 
 const queryClient = new QueryClient();
@@ -93,8 +95,8 @@ const App = () => (
                       <Route path="media" element={<AdminMedia />} />
                       <Route path="content" element={<AdminContent />} />
                       <Route path="notifications" element={<AdminNotifications />} />
-                      <Route path="analytics" element={<AdminStub title="Analyse" />} />
-                      <Route path="audit" element={<AdminStub title="Audit log" />} />
+                      <Route path="analytics" element={<AdminAnalytics />} />
+                      <Route path="audit" element={<AdminAudit />} />
                     </Route>
                     <Route path="*" element={<NotFound />} />
                   </Routes>
