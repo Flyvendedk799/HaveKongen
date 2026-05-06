@@ -224,6 +224,9 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     map.once("load", () => {
       // INTRO — fade map in, HUD slides in
       setStage("intro");
+      // Pre-warm high-res ortofoto tiles around the destination so the
+      // descent (zoom 15.5 → 18.7) renders crisp on the very first frame.
+      prewarmOrtoTiles(ortoWmsTemplate, center);
 
       at(T.introHold, () => {
         // GLOBE — gentle drift + slight zoom
