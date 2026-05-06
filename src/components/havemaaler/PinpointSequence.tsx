@@ -133,28 +133,45 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     return { version: 8, sources, layers } as any;
   }
 
-  // Mount Mapbox
+  // Mount Mapbox — deferred to next frame so the overlay paints first
+  // (eliminates the perceived freeze right after clicking the address)
   useEffect(() => {
     if (!containerRef.current || !mapboxToken) return;
     mapboxgl.accessToken = mapboxToken;
 
-    const map = new mapboxgl.Map({
-      container: containerRef.current,
-      style: buildStyle(),
-      center,
-      zoom: 3.6,
-      pitch: 0,
-      bearing: 0,
-      interactive: false,
-      attributionControl: false,
-      antialias: true,
-      fadeDuration: 600,
+    let map: mapboxgl.Map | null = null;
+    let cancelled = false;
+
+    // Double-RAF: wait for one paint of the overlay chrome before WebGL boot
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        if (cancelled || !containerRef.current) return;
+        map = new mapboxgl.Map({
+          container: containerRef.current,
+          style: buildStyle(),
+          center,
+          zoom: 3.6,
+          pitch: 0,
+          bearing: 0,
+          interactive: false,
+          attributionControl: false,
+          antialias: true,
+          fadeDuration: 300,
+        });
+        mapRef.current = map;
+        // Notify so the orchestration effect can attach its 'load' handler
+        setMapReady((n) => n + 1);
+      });
+      // store inner raf so we can cancel it
+      (rafRef.current as any) = raf2;
     });
-    mapRef.current = map;
+    rafRef.current = raf1;
 
     return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       clearTimers();
-      try { map.remove(); } catch {}
+      try { map?.remove(); } catch {}
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
