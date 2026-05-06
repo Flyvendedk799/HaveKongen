@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useCart, formatDkk, CartItem } from "@/lib/cart";
+import { usePageMeta } from "@/hooks/usePageMeta";
 import { toast } from "sonner";
 import { ShoppingCart } from "lucide-react";
 
@@ -34,8 +35,12 @@ export default function Webshop() {
   const cat = params.get("cat") || "all";
   const cart = useCart();
 
+  usePageMeta({
+    title: "Webshop · Havelandet",
+    description: "Frø, planter, jord og smarte værktøjer fra danske leverandører — testet i dansk klima.",
+  });
+
   useEffect(() => {
-    document.title = "Webshop · Havelandet";
     supabase.from("products").select("*").order("featured", { ascending: false }).then(({ data }) => {
       setProducts((data as Product[]) || []);
       setLoading(false);
