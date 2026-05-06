@@ -33,6 +33,11 @@ const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
 const AdminProducts = lazy(() => import("./pages/admin/AdminProducts.tsx"));
 const AdminProductEditor = lazy(() => import("./pages/admin/AdminProductEditor.tsx"));
+const AdminPlants = lazy(() => import("./pages/admin/AdminPlants.tsx"));
+const AdminPlantEditor = lazy(() => import("./pages/admin/AdminPlantEditor.tsx"));
+const AdminOrders = lazy(() => import("./pages/admin/AdminOrders.tsx"));
+const AdminOrderDetail = lazy(() => import("./pages/admin/AdminOrderDetail.tsx"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminStub = lazy(() => import("./pages/admin/AdminStub.tsx").then((m) => ({ default: m.AdminStub })));
 
 const queryClient = new QueryClient();
