@@ -1,9 +1,5 @@
-// segment-lawn: takes a bbox (in lng/lat) + zoom, fetches the corresponding ortofoto
-// composite from Dataforsyningen, sends it to Gemini 2.5 Pro vision with a prompt that
-// asks for a single GeoJSON polygon outlining the connected lawn touching a click point,
-// and returns simplified polygon coordinates in lng/lat.
-//
-// Caches by bbox+click hash in public.lawn_segmentation_cache.
+// segment-lawn v2: center-cropped high-resolution analysis around click point.
+// Returns polygon in lng/lat + confidence + analyzed bbox for client preview.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,33 +9,39 @@ const corsHeaders = {
 const LOVABLE_API = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 function hashKey(s: string): string {
-  // simple djb2
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
   return (h >>> 0).toString(36);
+}
+
+// Convert meters to degrees latitude/longitude at given lat
+function metersToDeg(m: number, lat: number): { dLat: number; dLng: number } {
+  const dLat = m / 111320;
+  const dLng = m / (111320 * Math.cos((lat * Math.PI) / 180));
+  return { dLat, dLng };
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const rawBody = await req.text();
-    console.log("segment-lawn req body length:", rawBody.length);
-    let body: any;
-    try { body = JSON.parse(rawBody || "{}"); }
-    catch (e) {
-      return new Response(JSON.stringify({ error: "invalid json body", raw: rawBody.slice(0,200) }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { bbox, click, width = 768, height = 768 } = body as {
-      bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
-      click: [number, number];                // [lng, lat]
+    const body = await req.json().catch(() => ({}));
+    const {
+      click,
+      cropMeters = 80, // size of analyzed window in meters (square)
+      width = 768,
+      height = 768,
+      hint, // optional: "tighter" | "looser" — for retry
+    } = body as {
+      click: [number, number];
+      cropMeters?: number;
       width?: number;
       height?: number;
+      hint?: string;
     };
-    if (!bbox || bbox.length !== 4 || !click || click.length !== 2) {
-      return new Response(JSON.stringify({ error: "bbox and click required" }), {
+
+    if (!click || click.length !== 2) {
+      return new Response(JSON.stringify({ error: "click [lng,lat] required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -52,72 +54,72 @@ Deno.serve(async (req) => {
       });
     }
 
-    const cacheKey = hashKey(JSON.stringify({ bbox, click, width, height }));
+    // Build a tight bbox centered on click
+    const [clng, clat] = click;
+    const half = cropMeters / 2;
+    const { dLat, dLng } = metersToDeg(half, clat);
+    const minLat = clat - dLat, maxLat = clat + dLat;
+    const minLng = clng - dLng, maxLng = clng + dLng;
 
-    // Check cache via Supabase REST (anon)
+    const cacheKey = hashKey(JSON.stringify({ click: [clng.toFixed(6), clat.toFixed(6)], cropMeters, hint: hint ?? "" }));
     const supaUrl = Deno.env.get("SUPABASE_URL")!;
     const supaKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    // Cache lookup
     try {
       const cacheRes = await fetch(
         `${supaUrl}/rest/v1/lawn_segmentation_cache?bbox_hash=eq.${cacheKey}&select=polygon`,
         { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } },
       );
-      const cacheTxt = await cacheRes.text();
-      const cached = cacheTxt ? JSON.parse(cacheTxt) : [];
+      const cached = await cacheRes.json().catch(() => []);
       if (Array.isArray(cached) && cached[0]?.polygon) {
-        return new Response(JSON.stringify({ polygon: cached[0].polygon, cached: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({
+          polygon: cached[0].polygon, cached: true, confidence: 0.95,
+          bbox: [minLng, minLat, maxLng, maxLat],
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     } catch (e) {
       console.warn("cache lookup failed:", String(e));
     }
 
-    // Fetch ortofoto via WMS in EPSG:4326 (BBOX order = minLat,minLng,maxLat,maxLng for v1.3)
-    const [minLng, minLat, maxLng, maxLat] = bbox;
+    // Fetch ortofoto WMS
     const wms = `https://api.dataforsyningen.dk/orto_foraar_DAF?service=WMS&request=GetMap`
       + `&version=1.3.0&layers=orto_foraar&styles=&format=image/jpeg&transparent=FALSE`
       + `&width=${width}&height=${height}&crs=EPSG:4326`
       + `&bbox=${minLat},${minLng},${maxLat},${maxLng}&token=${dfToken}`;
 
-    console.log("fetching wms...");
     const imgRes = await fetch(wms, { headers: { "Accept-Encoding": "identity", "Accept": "image/jpeg" } });
-    console.log("wms status:", imgRes.status, "ct:", imgRes.headers.get("content-type"), "cl:", imgRes.headers.get("content-length"), "ce:", imgRes.headers.get("content-encoding"));
     if (!imgRes.ok) {
       const t = await imgRes.text().catch(() => "");
-      return new Response(JSON.stringify({ error: "ortofoto fetch failed", status: imgRes.status, detail: t.slice(0,200) }), {
+      return new Response(JSON.stringify({ error: "ortofoto fetch failed", status: imgRes.status, detail: t.slice(0, 200) }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    let imgBuf: Uint8Array;
-    try {
-      imgBuf = new Uint8Array(await imgRes.arrayBuffer());
-    } catch (e) {
-      console.error("arrayBuffer failed:", String(e));
-      return new Response(JSON.stringify({ error: "ortofoto read failed", detail: String(e) }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    console.log("ortofoto bytes:", imgBuf.length);
+    const imgBuf = new Uint8Array(await imgRes.arrayBuffer());
     let bin = "";
     const CHUNK = 0x8000;
     for (let i = 0; i < imgBuf.length; i += CHUNK) {
       bin += String.fromCharCode.apply(null, Array.from(imgBuf.subarray(i, i + CHUNK)) as any);
     }
     const b64 = btoa(bin);
-    console.log("b64 length:", b64.length);
 
-    // Click as pixel coords
-    const px = Math.round(((click[0] - minLng) / (maxLng - minLng)) * width);
-    const py = Math.round(((maxLat - click[1]) / (maxLat - minLat)) * height);
+    // Click is at image center by construction
+    const px = Math.round(width / 2);
+    const py = Math.round(height / 2);
 
-    const prompt = `You are a precise aerial-imagery segmentation tool.
-The image is a top-down orthophoto of a Danish residential property, ${width}x${height} pixels.
-The user clicked on pixel (${px}, ${py}) which is on grass/lawn.
-Identify the single connected LAWN region containing that pixel. Exclude buildings, driveways, terraces, gravel, flowerbeds, hedges, paths, trees and shrubs.
-Return ONLY valid JSON of the form:
-{"polygon":[[x1,y1],[x2,y2],...]}
-where each [x,y] is a pixel coordinate (integers, 0-${width}). Provide 12-60 vertices, ordered along the boundary, no holes, no extra text.`;
+    const tighter = hint === "tighter";
+    const looser = hint === "looser";
+    const prompt = `You are an expert aerial-imagery segmentation tool for Danish residential properties.
+Image: top-down ortophoto, ${width}x${height} px, centered on a marker pixel (${px}, ${py}) which is on GRASS/LAWN.
+Task: outline the SINGLE connected lawn region containing that pixel.
+Exclude: buildings, roofs, driveways, gravel, terraces/decks, paved paths, flowerbeds, hedges, individual shrubs, trees with closed canopy, water, sand, bare soil.
+${tighter ? "Be CONSERVATIVE — only confidently green grass." : ""}
+${looser ? "Be slightly LOOSER — include grass partially shaded by trees." : ""}
+Return STRICT JSON only:
+{"polygon":[[x,y],...],"confidence":0.0-1.0,"notes":"<short>"}
+- 16-80 vertices, ordered along the boundary, no self-intersection.
+- Coordinates are integer pixels in [0,${width}] x [0,${height}].
+- confidence: how sure you are this is the true lawn boundary.`;
 
     const aiRes = await fetch(LOVABLE_API, {
       method: "POST",
@@ -135,8 +137,9 @@ where each [x,y] is a pixel coordinate (integers, 0-${width}). Provide 12-60 ver
     });
     if (!aiRes.ok) {
       const t = await aiRes.text();
-      return new Response(JSON.stringify({ error: "ai failed", detail: t.slice(0, 400) }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      const status = aiRes.status === 429 || aiRes.status === 402 ? aiRes.status : 502;
+      return new Response(JSON.stringify({ error: "ai failed", status: aiRes.status, detail: t.slice(0, 400) }), {
+        status, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const aiJson = await aiRes.json();
@@ -147,31 +150,46 @@ where each [x,y] is a pixel coordinate (integers, 0-${width}). Provide 12-60 ver
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    let parsed: { polygon: [number, number][] };
+    let parsed: { polygon: [number, number][]; confidence?: number; notes?: string };
     try { parsed = JSON.parse(m[0]); } catch {
       return new Response(JSON.stringify({ error: "ai json parse failed", raw: m[0].slice(0, 400) }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    if (!Array.isArray(parsed.polygon) || parsed.polygon.length < 4) {
+      return new Response(JSON.stringify({ error: "ai returned too few points", raw: txt.slice(0, 200) }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // pixel -> lng/lat
     const lnglat: [number, number][] = parsed.polygon.map(([x, y]) => [
       minLng + (x / width) * (maxLng - minLng),
       maxLat - (y / height) * (maxLat - minLat),
     ]);
 
-    // Cache
-    await fetch(`${supaUrl}/rest/v1/lawn_segmentation_cache`, {
-      method: "POST",
-      headers: {
-        apikey: supaKey, Authorization: `Bearer ${supaKey}`,
-        "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates",
-      },
-      body: JSON.stringify({ bbox_hash: cacheKey, polygon: lnglat, source: "gemini" }),
-    });
+    const confidence = typeof parsed.confidence === "number" ? Math.max(0, Math.min(1, parsed.confidence)) : 0.7;
 
-    return new Response(JSON.stringify({ polygon: lnglat, cached: false }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // Cache
+    try {
+      await fetch(`${supaUrl}/rest/v1/lawn_segmentation_cache`, {
+        method: "POST",
+        headers: {
+          apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+          "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates",
+        },
+        body: JSON.stringify({ bbox_hash: cacheKey, polygon: lnglat, source: "gemini" }),
+      });
+    } catch (e) { console.warn("cache write failed:", String(e)); }
+
+    return new Response(JSON.stringify({
+      polygon: lnglat,
+      cached: false,
+      confidence,
+      notes: parsed.notes,
+      bbox: [minLng, minLat, maxLng, maxLat],
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
