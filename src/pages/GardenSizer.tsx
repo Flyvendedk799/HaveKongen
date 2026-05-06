@@ -408,25 +408,73 @@ export default function GardenSizer() {
 
   const tier = TIERS.find((t) => area <= t.max) ?? TIERS[TIERS.length - 1];
 
-  // ----- Tools -----
-  function undo() {
-    if (mode === "exclude" && currentExclusion.length) {
-      setCurrentExclusion(p => p.slice(0, -1)); return;
-    }
-    if (mainClosed) { setMainClosed(false); return; }
-    setMain(p => p.slice(0, -1));
+  // ----- History (undo/redo) -----
+  type Snap2 = { main: Ring; mainClosed: boolean; exclusions: Ring[] };
+  const lastSerialized = useRef<string>("");
+  function applySnap(s: Snap2) {
+    skipHistoryRef.current = true;
+    setMain(s.main); setMainClosed(s.mainClosed); setExclusions(s.exclusions);
+    requestAnimationFrame(() => { skipHistoryRef.current = false; });
   }
+  function undo() {
+    const h = historyRef.current;
+    if (!h.past.length) return;
+    h.future.push({ main: [...main], mainClosed, exclusions: exclusions.map(r => [...r]) });
+    applySnap(h.past.pop()!);
+  }
+  function redo() {
+    const h = historyRef.current;
+    if (!h.future.length) return;
+    h.past.push({ main: [...main], mainClosed, exclusions: exclusions.map(r => [...r]) });
+    applySnap(h.future.pop()!);
+  }
+  useEffect(() => {
+    const ser = JSON.stringify({ main, mainClosed, exclusions });
+    if (ser === lastSerialized.current) return;
+    if (!skipHistoryRef.current && lastSerialized.current) {
+      try {
+        historyRef.current.past.push(JSON.parse(lastSerialized.current));
+        if (historyRef.current.past.length > 50) historyRef.current.past.shift();
+        historyRef.current.future = [];
+      } catch {}
+    }
+    lastSerialized.current = ser;
+  }, [main, mainClosed, exclusions]);
+
   function clear() {
     setMain([]); setMainClosed(false); setExclusions([]); setCurrentExclusion([]);
+    setWandConfidence(null); setWandBbox(null);
+  }
+
+  // ----- Snap helper -----
+  function snapPoint(ll: LngLat): LngLat {
+    if (!snapEnabled) return ll;
+    const map = mapRef.current; if (!map) return ll;
+    const candidates: LngLat[] = [];
+    main.forEach(p => candidates.push(p));
+    exclusions.forEach(r => r.forEach(p => candidates.push(p)));
+    if (matrikel) matrikel.forEach(p => candidates.push(p));
+    let best: { p: LngLat; d: number } | null = null;
+    for (const c of candidates) {
+      const d = pixelDistance(map, ll, c);
+      if (d < 12 && (!best || d < best.d)) best = { p: c, d };
+    }
+    if (best) { setSnapIndicator(best.p); return best.p; }
+    setSnapIndicator(null);
+    return ll;
+  }
+
+  function deleteVertex(ring: "main" | number, idx: number) {
+    if (ring === "main") {
+      setMain(p => p.length > 3 ? p.filter((_, i) => i !== idx) : p);
+    } else {
+      setExclusions(prev => prev.map((r, i) => i === ring ? (r.length > 3 ? r.filter((_, j) => j !== idx) : r) : r));
+    }
   }
 
   // ----- Matrikel lookup -----
   async function loadMatrikel() {
     if (!chosen) return;
-    const { data, error } = await supabase.functions.invoke("get-matrikel", {
-      body: null,
-    } as any).catch(() => ({ data: null, error: true }));
-    // invoke doesn't pass query params; use direct fetch with project URL instead
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-matrikel?lng=${chosen.center[0]}&lat=${chosen.center[1]}`;
     try {
       const r = await fetch(url, { headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } });
@@ -434,7 +482,6 @@ export default function GardenSizer() {
       const feat = j?.features?.[0];
       const coords = feat?.geometry?.coordinates;
       if (!coords) { toast("Ingen matrikel fundet"); return; }
-      // Polygon or MultiPolygon — take outer ring of first polygon
       const outer: LngLat[] = (coords[0][0] && Array.isArray(coords[0][0][0])) ? coords[0][0] : coords[0];
       setMatrikel(outer.map((p: any) => [p[0], p[1]]));
       toast.success("Matrikel hentet");
@@ -449,25 +496,38 @@ export default function GardenSizer() {
 
   // ----- Magic wand (AI) -----
   async function runMagicWand(click: LngLat) {
-    const map = mapRef.current; if (!map) return;
-    const b = map.getBounds();
-    const bbox: [number, number, number, number] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
     setWandLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("segment-lawn", {
-        body: { bbox, click, width: 768, height: 768 },
+        body: { click, cropMeters: 90, width: 768, height: 768 },
       });
-      if (error || !data?.polygon) { toast.error("AI-opmåling fejlede"); return; }
-      const ring = (data.polygon as LngLat[]);
-      // simplify
+      if (error || !data?.polygon) {
+        const msg = (error as any)?.message || "";
+        toast.error(msg.includes("402") ? "AI-kreditter brugt op" : msg.includes("429") ? "Travl gateway — prøv igen om lidt" : "AI-opmåling fejlede");
+        return;
+      }
+      const ring = data.polygon as LngLat[];
+      let simplified: LngLat[] = ring;
       try {
         const simp = turf.simplify(turf.polygon([[...ring, ring[0]]]), { tolerance: 0.00001, highQuality: true });
-        const coords = simp.geometry.coordinates[0].slice(0, -1) as LngLat[];
-        setMain(coords); setMainClosed(true); setMode("edit");
-      } catch {
-        setMain(ring); setMainClosed(true); setMode("edit");
+        simplified = simp.geometry.coordinates[0].slice(0, -1) as LngLat[];
+      } catch {}
+
+      if (wandOp === "add" && main.length >= 3 && mainClosed) {
+        const merged = unionRings(main, simplified);
+        if (merged) setMain(merged); else toast("Områderne overlapper ikke");
+      } else if (wandOp === "subtract" && main.length >= 3 && mainClosed) {
+        const sub = subtractRings(main, simplified);
+        if (sub) setMain(sub); else toast("Kunne ikke trække fra");
+      } else {
+        setMain(simplified); setMainClosed(true); setMode("edit");
       }
-      toast.success(data.cached ? "Hentet fra cache" : "AI-forslag klar — juster om nødvendigt");
+      setWandConfidence(data.confidence ?? null);
+      setWandBbox(data.bbox ?? null);
+      const conf = Math.round((data.confidence ?? 0.7) * 100);
+      toast.success(data.cached ? "Hentet fra cache" : `AI-forslag klar (${conf}% sikker)`);
+    } catch {
+      toast.error("AI-opmåling fejlede");
     } finally { setWandLoading(false); }
   }
 
