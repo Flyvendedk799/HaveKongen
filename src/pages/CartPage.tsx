@@ -1,12 +1,12 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { useCart, formatDkk } from "@/lib/cart";
-import { toast } from "sonner";
 
 export default function CartPage() {
   const cart = useCart();
   const items = cart.items;
   const total = cart.total();
+  const nav = useNavigate();
   const shipping = total > 499 || total === 0 ? 0 : 49;
 
   return (
@@ -58,8 +58,8 @@ export default function CartPage() {
               </div>
               <button
                 className="btn btn-primary"
-                style={{ width: "100%", marginTop: 24, height: 48 }}
-                onClick={() => toast("Betaling kommer snart — gem kurven så er den her når den åbner.")}
+                style={{ width: "100%", marginTop: 24, height: 48, justifyContent: "center" }}
+                onClick={() => nav("/checkout")}
               >
                 Til kassen
               </button>
