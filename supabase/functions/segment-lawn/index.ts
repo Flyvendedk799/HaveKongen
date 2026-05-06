@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
       + `&bbox=${minLat},${minLng},${maxLat},${maxLng}&token=${dfToken}`;
 
     console.log("fetching wms...");
-    const imgRes = await fetch(wms);
+    const imgRes = await fetch(wms, { headers: { "Accept-Encoding": "identity", "Accept": "image/jpeg" } });
     console.log("wms status:", imgRes.status, "ct:", imgRes.headers.get("content-type"), "cl:", imgRes.headers.get("content-length"), "ce:", imgRes.headers.get("content-encoding"));
     if (!imgRes.ok) {
       const t = await imgRes.text().catch(() => "");
