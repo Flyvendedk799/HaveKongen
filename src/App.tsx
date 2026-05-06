@@ -33,6 +33,11 @@ const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
 const AdminProducts = lazy(() => import("./pages/admin/AdminProducts.tsx"));
 const AdminProductEditor = lazy(() => import("./pages/admin/AdminProductEditor.tsx"));
+const AdminPlants = lazy(() => import("./pages/admin/AdminPlants.tsx"));
+const AdminPlantEditor = lazy(() => import("./pages/admin/AdminPlantEditor.tsx"));
+const AdminOrders = lazy(() => import("./pages/admin/AdminOrders.tsx"));
+const AdminOrderDetail = lazy(() => import("./pages/admin/AdminOrderDetail.tsx"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminStub = lazy(() => import("./pages/admin/AdminStub.tsx").then((m) => ({ default: m.AdminStub })));
 
 const queryClient = new QueryClient();
@@ -77,10 +82,11 @@ const App = () => (
                       <Route index element={<AdminDashboard />} />
                       <Route path="products" element={<AdminProducts />} />
                       <Route path="products/:id" element={<AdminProductEditor />} />
-                      <Route path="plants" element={<AdminStub title="Plante-katalog" />} />
-                      <Route path="orders" element={<AdminStub title="Ordrer" />} />
-                      <Route path="orders/:id" element={<AdminStub title="Ordre" />} />
-                      <Route path="users" element={<AdminStub title="Brugere" />} />
+                      <Route path="plants" element={<AdminPlants />} />
+                      <Route path="plants/:slug" element={<AdminPlantEditor />} />
+                      <Route path="orders" element={<AdminOrders />} />
+                      <Route path="orders/:id" element={<AdminOrderDetail />} />
+                      <Route path="users" element={<AdminUsers />} />
                       <Route path="media" element={<AdminStub title="Mediebibliotek" />} />
                       <Route path="content" element={<AdminStub title="Indhold" />} />
                       <Route path="notifications" element={<AdminStub title="Notifikationer" />} />
