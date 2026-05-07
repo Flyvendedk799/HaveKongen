@@ -109,7 +109,7 @@ export default function WateringPlan() {
         name: b.name, type: b.type as any, area_m2: b.area_m2,
         sun_exposure: b.sun_exposure, soil: b.soil,
       }).select().single();
-      if (error) toast.error(error.message);
+      if (error || !data) { toast.error(error?.message ?? "Fejl"); return; }
       setZones(prev => [...prev, data as ZoneRow]);
       setNewZoneId(data.id);
       setTimeout(() => setNewZoneId(null), 1500);
