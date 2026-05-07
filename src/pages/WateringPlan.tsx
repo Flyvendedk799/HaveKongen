@@ -126,7 +126,26 @@ export default function WateringPlan() {
     fetchForecast(garden.latitude, garden.longitude).then(setForecasts).catch(() => setForecasts([]));
   }, [garden?.latitude, garden?.longitude]);
 
-  const summary = useMemo(() => weekSummary(schedules, zones, forecasts), [schedules, zones, forecasts]);
+  const decideOpts = useMemo(() => ({ pauseUntil, snoozedKeys }), [pauseUntil, snoozedKeys]);
+  const summary = useMemo(() => weekSummary(schedules, zones, forecasts, decideOpts), [schedules, zones, forecasts, decideOpts]);
+  const precip24h = useMemo(() => precipNextHours(forecasts, 24), [forecasts]);
+
+  function exportICS() {
+    const ics = buildICS(schedules, zones, forecasts, decideOpts);
+    const blob = new Blob([ics], { type: "text/calendar" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "vandingsplan.ics"; a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Kalender hentet");
+  }
+
+  async function duplicateSchedule(s: Schedule) {
+    if (!user) return;
+    const { id, ...rest } = s;
+    const { data, error } = await supabase.from("watering_schedules").insert({ ...rest, user_id: user.id, name: `${s.name} (kopi)` }).select().single();
+    if (error || !data) { toast.error(error?.message ?? "Fejl"); return; }
+    setSchedules(prev => [...prev, data as Schedule]);
+  }
 
   // ----- Bed CRUD -----
   async function saveBed(b: BedDraft): Promise<void> {
