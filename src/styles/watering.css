@@ -45,3 +45,21 @@
   .water-aurora, .water-pulse-border { animation: none !important; }
   .water-card:hover, .water-day-cell:hover { transform: none; }
 }
+
+.water-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  align-items: center;
+}
+.water-hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .water-hero-grid { grid-template-columns: 1fr; }
+  .water-hero-actions { width: 100%; }
+  .water-hero-actions > * { flex: 1 1 0; }
+  .water-card { padding: 16px; border-radius: 14px; }
+}

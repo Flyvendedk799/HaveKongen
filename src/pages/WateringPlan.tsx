@@ -9,14 +9,14 @@ import { useActiveGarden } from "@/lib/activeGarden";
 import { toast } from "sonner";
 import {
   Forecast, Schedule, Zone,
-  decide, fetchForecast, litersForSession, maskHas, maskToggle,
+  decide, fetchForecast, litersForSession,
   upcomingOccurrences, weekSummary,
 } from "@/lib/wateringAI";
 import AddBedDialog, { BedDraft } from "@/components/watering/AddBedDialog";
-import DecisionPill from "@/components/watering/DecisionPill";
 import WeekStrip from "@/components/watering/WeekStrip";
 import CountUp from "@/components/watering/CountUp";
 import AiPlanPreview, { AiPlan } from "@/components/watering/AiPlanPreview";
+import ScheduleRow from "@/components/watering/ScheduleRow";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -32,7 +32,7 @@ type EventRow = {
   ran_at: string | null; weather_skipped: boolean; reason: string | null; mm_delivered: number | null;
 };
 
-const DAYS = ["M", "T", "O", "T", "F", "L", "S"];
+
 
 export default function WateringPlan() {
   const { user, loading: authLoading } = useAuth();
@@ -166,12 +166,27 @@ export default function WateringPlan() {
     setAiLoading(true);
     setAiPlan(null);
     try {
+      // Pull plants per zone for richer AI context
+      const { data: plants } = await supabase
+        .from("user_plants")
+        .select("zone_id, custom_name, plant_slug, plants_catalog(name_da, water_need)")
+        .eq("garden_id", garden.id);
+      const plantsByZone: Record<string, { name: string; water_need?: string | null }[]> = {};
+      (plants ?? []).forEach((p: any) => {
+        if (!p.zone_id) return;
+        (plantsByZone[p.zone_id] ||= []).push({
+          name: p.custom_name || p.plants_catalog?.name_da || p.plant_slug || "plante",
+          water_need: p.plants_catalog?.water_need ?? null,
+        });
+      });
+
       const { data, error } = await supabase.functions.invoke("generate-watering-plan", {
         body: {
           lat: garden.latitude, lng: garden.longitude,
           zones: zones.map(z => ({
             id: z.id, name: z.name, type: z.type, area_m2: z.area_m2,
             sun_exposure: z.sun_exposure, soil: z.soil,
+            plants: plantsByZone[z.id] ?? [],
           })),
         },
       });
@@ -256,7 +271,7 @@ export default function WateringPlan() {
         {garden && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
             className="water-card" style={{ marginBottom: 20 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+            <div className="water-hero-grid">
               <div>
                 <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-500)", marginBottom: 8 }}>
                   Denne uge · {garden.name}
@@ -282,7 +297,7 @@ export default function WateringPlan() {
                   )}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div className="water-hero-actions">
                 <Button variant="outline" onClick={() => { setEditing(undefined); setBedOpen(true); }}>
                   <Plus size={16} className="mr-1.5" /> Tilføj bed
                 </Button>
@@ -388,62 +403,11 @@ export default function WateringPlan() {
                       {zSchedules.map((s) => {
                         const next = upcomingOccurrences(s, 7)[0];
                         const dec = next ? decide(s, z, next, forecasts, last48) : null;
+                        const nextLabel = next ? `${formatDate(next)} kl. ${s.start_time.slice(0, 5)}` : undefined;
                         return (
-                          <motion.div key={s.id} layout
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                            style={{
-                              display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
-                              padding: 12, borderRadius: 12,
-                              border: "1px solid rgba(20,39,29,0.08)",
-                              background: s.enabled ? "rgba(20,39,29,0.02)" : "rgba(20,39,29,0.04)",
-                              filter: s.enabled ? "none" : "grayscale(0.6)",
-                              transition: "filter .25s ease",
-                            }}>
-                            <input type="text" value={s.name}
-                              onChange={(e) => updateSchedule(s.id, { name: e.target.value })}
-                              style={{ border: "1px solid rgba(20,39,29,0.15)", borderRadius: 8, padding: "6px 10px", fontSize: 14, background: "#fff", width: 130 }} />
-                            <div style={{ display: "flex", gap: 4 }}>
-                              {DAYS.map((d, i) => {
-                                const active = maskHas(s.weekday_mask, i);
-                                return (
-                                  <button key={i} type="button" aria-pressed={active}
-                                    onClick={() => updateSchedule(s.id, { weekday_mask: maskToggle(s.weekday_mask, i) })}
-                                    style={{
-                                      width: 28, height: 28, borderRadius: 8,
-                                      border: "1px solid rgba(20,39,29,0.15)",
-                                      background: active ? "var(--forest-800)" : "#fff",
-                                      color: active ? "#fff" : "var(--forest-800)",
-                                      fontSize: 12, fontWeight: 600, cursor: "pointer",
-                                      transition: "transform .15s ease, background .15s ease",
-                                    }}>{d}</button>
-                                );
-                              })}
-                            </div>
-                            <input type="time" value={s.start_time.slice(0, 5)}
-                              onChange={(e) => updateSchedule(s.id, { start_time: `${e.target.value}:00` })}
-                              style={{ border: "1px solid rgba(20,39,29,0.15)", borderRadius: 8, padding: "6px 10px", fontSize: 14, background: "#fff", width: 100 }} />
-                            <input type="number" min={1} max={120} value={s.duration_min}
-                              onChange={(e) => updateSchedule(s.id, { duration_min: Number(e.target.value) })}
-                              style={{ border: "1px solid rgba(20,39,29,0.15)", borderRadius: 8, padding: "6px 10px", fontSize: 14, background: "#fff", width: 70 }} />
-                            <span style={{ fontSize: 12, color: "var(--ink-500)" }}>min</span>
-
-                            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-600)" }}>
-                              <Switch checked={s.ai_adjusted} onCheckedChange={(v) => updateSchedule(s.id, { ai_adjusted: v })} />
-                              AI
-                            </label>
-                            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-600)" }}>
-                              <Switch checked={s.enabled} onCheckedChange={(v) => updateSchedule(s.id, { enabled: v })} />
-                              Aktiv
-                            </label>
-
-                            <div style={{ flex: 1, minWidth: 220, display: "flex", alignItems: "center", gap: 8 }}>
-                              {dec && <DecisionPill d={dec} />}
-                              {next && <span style={{ fontSize: 12, color: "var(--ink-500)" }}>{formatDate(next)} kl. {s.start_time.slice(0, 5)}</span>}
-                            </div>
-
-                            <button onClick={() => deleteSchedule(s.id)} aria-label="Slet timer"
-                              style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid rgba(20,39,29,0.15)", background: "#fff", cursor: "pointer", color: "var(--ink-500)" }}>×</button>
-                          </motion.div>
+                          <ScheduleRow key={s.id} s={s} decision={dec} nextLabel={nextLabel}
+                            onChange={(patch) => updateSchedule(s.id, patch)}
+                            onDelete={() => deleteSchedule(s.id)} />
                         );
                       })}
                     </div>
