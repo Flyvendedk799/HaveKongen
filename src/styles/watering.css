@@ -1,0 +1,47 @@
+.water-aurora {
+  position: relative;
+  background: linear-gradient(120deg, var(--forest-800) 0%, #2a8a55 50%, var(--forest-800) 100%);
+  background-size: 200% 100%;
+  animation: water-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes water-shimmer {
+  0% { background-position: 0% 0; }
+  100% { background-position: -200% 0; }
+}
+.water-pulse-border {
+  animation: water-pulse-border 1.4s ease-out 1;
+}
+@keyframes water-pulse-border {
+  0% { box-shadow: 0 0 0 0 rgba(20,120,60,0.5); }
+  100% { box-shadow: 0 0 0 14px rgba(20,120,60,0); }
+}
+.water-card {
+  background: #fff;
+  border: 1px solid rgba(20,39,29,0.08);
+  border-radius: 16px;
+  padding: 22px;
+  transition: box-shadow .3s ease, transform .3s ease;
+}
+.water-card:hover {
+  box-shadow: 0 8px 32px -16px rgba(20,39,29,0.18);
+}
+.water-day-cell {
+  text-align: center;
+  padding: 12px 4px;
+  border-radius: 12px;
+  background: var(--ink-50);
+  border: 1px solid transparent;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.water-day-cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px -4px rgba(20,39,29,0.12);
+}
+.water-day-cell.wet {
+  background: rgba(60,120,200,0.10);
+  border-color: rgba(60,120,200,0.25);
+}
+@media (prefers-reduced-motion: reduce) {
+  .water-aurora, .water-pulse-border { animation: none !important; }
+  .water-card:hover, .water-day-cell:hover { transform: none; }
+}
