@@ -154,7 +154,7 @@ export default function WateringPlan() {
       scheduled_for: new Date().toISOString(), ran_at: new Date().toISOString(),
       weather_skipped: false, reason: "Manuel", mm_delivered: 5,
     }).select().single();
-    if (error) toast.error(error.message);
+    if (error || !data) { toast.error(error?.message ?? "Fejl"); return; }
     setEvents(prev => [data as EventRow, ...prev]);
     toast.success(`Vander ${zone.name} · ~${liters} L`);
   }
