@@ -100,7 +100,7 @@ export default function WateringPlan() {
         name: b.name, type: b.type as any, area_m2: b.area_m2,
         sun_exposure: b.sun_exposure, soil: b.soil,
       }).eq("id", b.id);
-      if (error) return toast.error(error.message);
+      if (error) toast.error(error.message);
       setZones(prev => prev.map(z => z.id === b.id ? { ...z, ...b } as ZoneRow : z));
       toast.success("Bed opdateret");
     } else {
@@ -109,7 +109,7 @@ export default function WateringPlan() {
         name: b.name, type: b.type as any, area_m2: b.area_m2,
         sun_exposure: b.sun_exposure, soil: b.soil,
       }).select().single();
-      if (error) return toast.error(error.message);
+      if (error) toast.error(error.message);
       setZones(prev => [...prev, data as ZoneRow]);
       setNewZoneId(data.id);
       setTimeout(() => setNewZoneId(null), 1500);
@@ -120,7 +120,7 @@ export default function WateringPlan() {
   async function deleteZone(z: ZoneRow) {
     await supabase.from("watering_schedules").delete().eq("zone_id", z.id);
     const { error } = await supabase.from("garden_zones").delete().eq("id", z.id);
-    if (error) return toast.error(error.message);
+    if (error) toast.error(error.message);
     setSchedules(prev => prev.filter(s => s.zone_id !== z.id));
     setZones(prev => prev.filter(x => x.id !== z.id));
     toast.success("Bed slettet");
@@ -134,7 +134,7 @@ export default function WateringPlan() {
       weekday_mask: 21, start_time: "06:30:00", duration_min: 15,
       enabled: true, ai_adjusted: true,
     }).select().single();
-    if (error) return toast.error(error.message);
+    if (error) toast.error(error.message);
     setSchedules(prev => [...prev, data as Schedule]);
   }
   async function updateSchedule(id: string, patch: Partial<Schedule>) {
@@ -154,7 +154,7 @@ export default function WateringPlan() {
       scheduled_for: new Date().toISOString(), ran_at: new Date().toISOString(),
       weather_skipped: false, reason: "Manuel", mm_delivered: 5,
     }).select().single();
-    if (error) return toast.error(error.message);
+    if (error) toast.error(error.message);
     setEvents(prev => [data as EventRow, ...prev]);
     toast.success(`Vander ${zone.name} · ~${liters} L`);
   }
@@ -198,7 +198,7 @@ export default function WateringPlan() {
       duration_min: s.duration_min, enabled: true, ai_adjusted: true,
     })));
     const { data, error } = await supabase.from("watering_schedules").insert(rows).select();
-    if (error) return toast.error(error.message);
+    if (error) toast.error(error.message);
     setSchedules(prev => [...prev.filter(s => !zoneIds.includes(s.zone_id)), ...((data ?? []) as Schedule[])]);
     setAiOpen(false);
     setAiPlan(null);
