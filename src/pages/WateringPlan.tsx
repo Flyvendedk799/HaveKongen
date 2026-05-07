@@ -9,14 +9,14 @@ import { useActiveGarden } from "@/lib/activeGarden";
 import { toast } from "sonner";
 import {
   Forecast, Schedule, Zone,
-  decide, fetchForecast, litersForSession, maskHas, maskToggle,
+  decide, fetchForecast, litersForSession,
   upcomingOccurrences, weekSummary,
 } from "@/lib/wateringAI";
 import AddBedDialog, { BedDraft } from "@/components/watering/AddBedDialog";
-import DecisionPill from "@/components/watering/DecisionPill";
 import WeekStrip from "@/components/watering/WeekStrip";
 import CountUp from "@/components/watering/CountUp";
 import AiPlanPreview, { AiPlan } from "@/components/watering/AiPlanPreview";
+import ScheduleRow from "@/components/watering/ScheduleRow";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
