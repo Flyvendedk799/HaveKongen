@@ -203,6 +203,71 @@ export function moistureDeficit(zone: Zone, forecasts: Forecast[], wateredMmLast
   return ratio;
 }
 
+// ===== FAO-56 lite soil-water balance =====
+// Maintains a per-zone "depletion" (mm) — how dry the root zone is — by simulating
+// daily inputs (rain + irrigation) minus outputs (ETc = ET0 * Kc * sun adj).
+// Field capacity (TAW) defaults vary by soil. Irrigate when depletion > MAD * TAW.
+const TAW_BY_SOIL: Record<string, number> = { sand: 30, loam: 45, clay: 60 };
+const MAD = 0.5; // allow 50% depletion before stress
+
+export type BalanceDay = {
+  date: string;
+  rain: number;
+  et0: number;
+  irrigationMm: number;
+};
+
+export type BalanceState = {
+  depletion: number;   // mm depleted from field capacity (0 = wet, TAW = wilting)
+  taw: number;         // total available water (mm)
+  stress: boolean;     // depletion > MAD*TAW
+};
+
+export function initialBalance(zone: Zone): BalanceState {
+  const taw = TAW_BY_SOIL[(zone.soil ?? "loam").toLowerCase()] ?? 45;
+  return { depletion: taw * 0.3, taw, stress: false };
+}
+
+export function stepBalance(
+  state: BalanceState,
+  zone: Zone,
+  day: BalanceDay,
+  kc = 1,
+): BalanceState {
+  const sun = (zone.sun_exposure ?? "sun").toLowerCase().startsWith("sun") ? 1.1 : 0.85;
+  const etc = (day.et0 ?? 3) * kc * sun;
+  // Inputs reduce depletion, capped at 0 (no overflow stored)
+  const next = Math.max(0, state.depletion - day.rain - day.irrigationMm + etc);
+  const dep = Math.min(state.taw, next);
+  return { depletion: dep, taw: state.taw, stress: dep > state.taw * MAD };
+}
+
+/** Project per-zone depletion across the next N days using forecasts + planned schedules. */
+export function projectBalance(
+  zone: Zone,
+  schedules: Schedule[],
+  forecasts: Forecast[],
+  opts: DecideOpts = {},
+): { day: string; depletion: number; pct: number; stress: boolean }[] {
+  let state = initialBalance(zone);
+  const last48 = forecasts.slice(0, 2).reduce((a, b) => a + b.precip_mm, 0);
+  return forecasts.slice(0, 7).map((f) => {
+    const date = new Date(f.date + "T12:00:00");
+    let irrigationMm = 0;
+    for (const s of schedules.filter((x) => x.zone_id === zone.id)) {
+      if (!maskHas(s.weekday_mask, dowMon0(date))) continue;
+      const dec = decide(s, zone, date, forecasts, last48, opts);
+      if (dec.action === "skip") continue;
+      // Convert minutes→mm via volume coefficient (rough): area-independent mm equivalent
+      const mm = (VOL_COEFF[zone.type] ?? 4) * (dec.effectiveMin / 15) * 0.6;
+      irrigationMm += mm;
+    }
+    state = stepBalance(state, zone, { date: f.date, rain: f.precip_mm, et0: f.et0 ?? 3, irrigationMm });
+    const pct = Math.round((state.depletion / state.taw) * 100);
+    return { day: f.date, depletion: state.depletion, pct, stress: state.stress };
+  });
+}
+
 /** Total expected precip in next `hours` hours (uses daily granularity, weighted). */
 export function precipNextHours(forecasts: Forecast[], hours = 24): number {
   if (forecasts.length === 0) return 0;
