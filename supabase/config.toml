@@ -15,3 +15,6 @@ verify_jwt = false
 [functions.weather-sync]
 verify_jwt = false
 
+[functions.plant-diagnose]
+verify_jwt = false
+
