@@ -12,3 +12,6 @@ verify_jwt = false
 [functions.generate-watering-plan]
 verify_jwt = false
 
+[functions.weather-sync]
+verify_jwt = false
+
