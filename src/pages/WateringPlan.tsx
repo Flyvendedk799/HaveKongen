@@ -21,6 +21,7 @@ import MoistureGauge from "@/components/watering/MoistureGauge";
 import PauseControl from "@/components/watering/PauseControl";
 import RainAlert from "@/components/watering/RainAlert";
 import TodayHero from "@/components/watering/TodayHero";
+import DepletionChart from "@/components/watering/DepletionChart";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -462,8 +463,9 @@ export default function WateringPlan() {
                     </div>
 
                     {forecasts.length > 0 && (
-                      <div style={{ marginBottom: 14 }}>
+                      <div style={{ marginBottom: 14, display: "grid", gap: 12 }}>
                         <MoistureGauge deficit={moistureDeficit(z, forecasts)} />
+                        <DepletionChart zone={z} schedules={zSchedules} forecasts={forecasts} opts={decideOpts} />
                       </div>
                     )}
 

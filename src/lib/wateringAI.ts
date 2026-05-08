@@ -5,6 +5,7 @@ export type Forecast = {
   date: string;            // YYYY-MM-DD
   precip_mm: number;
   temp_max: number;
+  temp_min?: number;
   et0: number;             // mm/day FAO ET0 (Open-Meteo)
   wind_max?: number;
 };
@@ -112,7 +113,18 @@ export function decide(
   const fc = forecasts.find((f) => f.date === key);
   const precip = fc?.precip_mm ?? 0;
   const temp = fc?.temp_max ?? 18;
+  const tmin = fc?.temp_min ?? 10;
+  const wind = fc?.wind_max ?? 0;
   const et0 = fc?.et0 ?? 3;
+
+  // Frost guard — never irrigate when night drops below ~2 °C; risk of root/leaf damage.
+  if (tmin <= 2) {
+    return { action: "skip", reason: `Frostrisiko · nat ${Math.round(tmin)} °C`, effectiveMin: 0, mmExpected: precip, confidence: "high" };
+  }
+  // High-wind guard — sprinklers waste >40% above 8 m/s; reschedule by skipping today.
+  if (wind >= 9) {
+    return { action: "skip", reason: `For meget vind · ${Math.round(wind)} m/s`, effectiveMin: 0, mmExpected: precip, confidence: "medium" };
+  }
 
   if (opts.pauseUntil && occ.getTime() < opts.pauseUntil.getTime()) {
     return { action: "skip", reason: `Pauseret til ${opts.pauseUntil.toLocaleDateString("da-DK", { day: "numeric", month: "short" })}`, effectiveMin: 0, mmExpected: precip, confidence: "high" };
@@ -144,7 +156,13 @@ export function decide(
   let reason = `Vand som planlagt · ${min} min`;
 
   const fullSun = (zone.sun_exposure ?? "sun").toLowerCase().startsWith("sun");
-  if (temp > 28 && fullSun) {
+  // Heatwave: sustained >30 °C
+  const heatwave = forecasts.slice(0, 3).filter((f) => (f.temp_max ?? 0) >= 30).length >= 2;
+  if (heatwave && fullSun) {
+    min = Math.round(min * 1.35);
+    action = "boost";
+    reason = `Hedebølge · øger til ${min} min`;
+  } else if (temp > 28 && fullSun) {
     min = Math.round(min * 1.2);
     action = "boost";
     reason = `Øger til ${min} min · varme ${Math.round(temp)} °C`;
@@ -333,13 +351,14 @@ export function saveCachedForecast(lat: number, lng: number, data: Forecast[]) {
 export async function fetchForecast(lat: number, lng: number): Promise<Forecast[]> {
   const cached = loadCachedForecast(lat, lng);
   if (cached) return cached;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=precipitation_sum,temperature_2m_max,et0_fao_evapotranspiration,wind_speed_10m_max&timezone=Europe%2FCopenhagen&forecast_days=14`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration,wind_speed_10m_max&timezone=Europe%2FCopenhagen&forecast_days=14`;
   const j = await fetch(url).then((r) => r.json());
   const dates: string[] = j?.daily?.time ?? [];
   const out: Forecast[] = dates.map((d, i) => ({
     date: d,
     precip_mm: j.daily.precipitation_sum?.[i] ?? 0,
     temp_max: j.daily.temperature_2m_max?.[i] ?? 18,
+    temp_min: j.daily.temperature_2m_min?.[i] ?? 10,
     et0: j.daily.et0_fao_evapotranspiration?.[i] ?? 3,
     wind_max: j.daily.wind_speed_10m_max?.[i] ?? 0,
   }));

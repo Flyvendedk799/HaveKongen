@@ -5,9 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import DiagnosisCard, { type Diagnosis } from "@/components/plantcare/DiagnosisCard";
 
 type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
-type Msg = { role: "user" | "assistant"; content: string | ContentPart[] };
+type Msg = { role: "user" | "assistant"; content: string | ContentPart[]; diagnosis?: Diagnosis };
 type Conv = { id: string; title: string; updated_at: string };
 
 const STARTERS = [
@@ -115,6 +116,17 @@ export default function PlantCareAI() {
         content: persistedText,
       });
 
+      // If image present, run structured diagnosis in parallel for a richer card
+      let diagnosis: Diagnosis | null = null;
+      if (imageDataUrl) {
+        try {
+          const { data: dx } = await supabase.functions.invoke("plant-diagnose", {
+            body: { imageDataUrl, note: trimmed },
+          });
+          if (dx && !(dx as any).error) diagnosis = dx as Diagnosis;
+        } catch (e) { console.warn("diagnose failed", e); }
+      }
+
       // Call edge function with streaming
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/plant-care-chat`;
       const resp = await fetch(url, {
@@ -123,7 +135,7 @@ export default function PlantCareAI() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: history, hasImage: !!imageDataUrl }),
+        body: JSON.stringify({ messages: history, hasImage: !!imageDataUrl, diagnosis }),
       });
 
       if (resp.status === 429) { toast.error("For mange beskeder — prøv igen om lidt."); setStreaming(false); return; }
@@ -136,7 +148,7 @@ export default function PlantCareAI() {
       let assistantText = "";
       let done = false;
 
-      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "", diagnosis: diagnosis ?? undefined }]);
 
       while (!done) {
         const { done: d, value } = await reader.read();
@@ -333,7 +345,10 @@ export default function PlantCareAI() {
                         )}
                         <div className="prose-chat" style={{ fontSize: 15, lineHeight: 1.65, color: "var(--ink-900)" }}>
                           {m.role === "assistant" ? (
-                            <ReactMarkdown>{text || "…"}</ReactMarkdown>
+                            <>
+                              {m.diagnosis && <div style={{ marginBottom: 14 }}><DiagnosisCard d={m.diagnosis} /></div>}
+                              <ReactMarkdown>{text || (m.diagnosis ? "" : "…")}</ReactMarkdown>
+                            </>
                           ) : (
                             <div style={{ whiteSpace: "pre-wrap" }}>{text}</div>
                           )}
