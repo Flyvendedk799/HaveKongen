@@ -323,37 +323,41 @@ export default function WateringPlan() {
           </div>
         )}
 
-        {/* Summary + actions hero */}
-        {garden && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-            className="water-card" style={{ marginBottom: 20 }}>
-            <div className="water-hero-grid">
-              <div>
-                <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-500)", marginBottom: 8 }}>
-                  Denne uge · {garden.name}
-                </div>
-                <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "baseline" }}>
-                  <div>
-                    <div style={{ fontSize: 36, fontWeight: 600, lineHeight: 1, color: "var(--forest-800)" }}>
-                      <CountUp value={summary.plannedL} suffix=" L" />
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 4 }}>
-                      planlagt · {summary.waterCount} vandinger
-                    </div>
-                  </div>
-                  {summary.savedL > 0 && (
-                    <div>
-                      <div style={{ fontSize: 22, fontWeight: 600, color: "#2d5a8a" }}>
-                        +<CountUp value={summary.savedL} suffix=" L" /> sparet
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 4 }}>
-                        {summary.skipCount} springes over (vejr)
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="water-hero-actions">
+        {/* Today hero (cinema) */}
+        {garden && (() => {
+          const todayKey = new Date().toISOString().slice(0, 10);
+          const todayFc = forecasts.find((f) => f.date === todayKey);
+          // Find the next upcoming non-skipped occurrence across all schedules
+          let nextRun: { at: Date; action: any } | null = null;
+          for (const s of schedules) {
+            const z = zones.find((zz) => zz.id === s.zone_id);
+            if (!z) continue;
+            const occs = upcomingOccurrences(s, 7);
+            for (const o of occs) {
+              const d = decide(s, z, o, forecasts, last48, decideOpts);
+              if (d.action === "skip") continue;
+              if (!nextRun || o.getTime() < nextRun.at.getTime()) nextRun = { at: o, action: d.action };
+            }
+          }
+          let decisionToday: "water" | "skip" | "boost" | "reduce" | "idle" = "idle";
+          if (todayFc && (todayFc.precip_mm ?? 0) >= 4) decisionToday = "skip";
+          else if (nextRun && nextRun.at.toDateString() === new Date().toDateString()) decisionToday = nextRun.action;
+          else if (schedules.length === 0) decisionToday = "idle";
+          else decisionToday = "water";
+
+          return (
+            <>
+              <TodayHero
+                gardenName={garden.name}
+                plannedL={summary.plannedL}
+                savedL={summary.savedL}
+                waterCount={summary.waterCount}
+                skipCount={summary.skipCount}
+                nextRunAt={nextRun?.at ?? null}
+                forecasts={forecasts}
+                decisionToday={decisionToday}
+              />
+              <div className="water-hero-actions" style={{ marginBottom: 22 }}>
                 <PauseControl pauseUntil={pauseUntil} onPause={setPauseUntil} />
                 <Button variant="outline" onClick={exportICS} disabled={schedules.length === 0} title="Hent som .ics kalender">
                   <Calendar size={16} className="mr-1.5" /> Kalender
@@ -366,9 +370,9 @@ export default function WateringPlan() {
                   <Sparkles size={16} className="mr-1.5" /> {aiLoading ? "Tænker…" : "Generér AI-plan"}
                 </Button>
               </div>
-            </div>
-          </motion.div>
-        )}
+            </>
+          );
+        })()}
 
         {/* Smart rain alert */}
         {garden && forecasts.length > 0 && (
