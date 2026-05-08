@@ -20,6 +20,7 @@ import ScheduleRow from "@/components/watering/ScheduleRow";
 import MoistureGauge from "@/components/watering/MoistureGauge";
 import PauseControl from "@/components/watering/PauseControl";
 import RainAlert from "@/components/watering/RainAlert";
+import TodayHero from "@/components/watering/TodayHero";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
