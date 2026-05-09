@@ -246,7 +246,7 @@ Deno.serve(async (req) => {
       ? parcelPolygon.map(ll2px).filter(([x, y]) => x >= -80 && x <= width + 80 && y >= -80 && y <= height + 80)
       : undefined;
 
-    const models = ["google/gemini-2.5-flash"];
+    const models = ["google/gemini-2.5-flash", "google/gemini-2.5-pro"];
 
     let best: { polygon: [number, number][]; exclusions: [number, number][][]; confidence: number; notes?: string } | null = null;
     let lastError = "";
