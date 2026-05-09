@@ -571,7 +571,7 @@ export default function GardenSizer() {
     setWandLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("segment-lawn", {
-        body: { click, cropMeters: 90, width: 768, height: 768 },
+        body: { click, cropMeters: 70, width: 1024, height: 1024 },
       });
       if (error || !data?.polygon) {
         const msg = (error as any)?.message || (data as any)?.error || "";
