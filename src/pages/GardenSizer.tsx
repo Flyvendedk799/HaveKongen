@@ -570,8 +570,19 @@ export default function GardenSizer() {
   async function runMagicWand(click: LngLat) {
     setWandLoading(true);
     try {
+      // If we have a matrikel (cadastral parcel) loaded, send its bbox so the AI
+      // focuses only on the user's actual property — never neighbours' lawns.
+      let parcelBbox: [number, number, number, number] | undefined;
+      if (matrikel && matrikel.length >= 3) {
+        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+        for (const [lng, lat] of matrikel) {
+          if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+        }
+        parcelBbox = [minLng, minLat, maxLng, maxLat];
+      }
       const { data, error } = await supabase.functions.invoke("segment-lawn", {
-        body: { click, cropMeters: 70, width: 1024, height: 1024 },
+        body: { click, cropMeters: 50, width: 1024, height: 1024, parcelBbox },
       });
       if (error || !data?.polygon) {
         const msg = (error as any)?.message || (data as any)?.error || "";
