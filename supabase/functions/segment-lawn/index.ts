@@ -145,9 +145,11 @@ Deno.serve(async (req) => {
       height = 1024,
       hint,
       parcelBbox,
+      parcelPolygon,
     } = body as {
       click: [number, number]; cropMeters?: number; width?: number; height?: number; hint?: string;
       parcelBbox?: [number, number, number, number]; // [minLng,minLat,maxLng,maxLat]
+      parcelPolygon?: [number, number][];
     };
 
     if (!click || click.length !== 2) {
@@ -236,15 +238,22 @@ Deno.serve(async (req) => {
     // Click pixel within the (possibly parcel-clipped) crop
     const px = Math.round(((clng - minLng) / (maxLng - minLng)) * width);
     const py = Math.round(((maxLat - clat) / (maxLat - minLat)) * height);
+    const ll2px = ([lng, lat]: [number, number]): [number, number] => [
+      Math.round(((lng - minLng) / (maxLng - minLng)) * width),
+      Math.round(((maxLat - lat) / (maxLat - minLat)) * height),
+    ];
+    const parcelPixels = Array.isArray(parcelPolygon) && parcelPolygon.length >= 3
+      ? parcelPolygon.map(ll2px).filter(([x, y]) => x >= -80 && x <= width + 80 && y >= -80 && y <= height + 80)
+      : undefined;
 
-    const models = ["google/gemini-2.5-pro", "google/gemini-2.5-flash"];
+    const models = ["google/gemini-2.5-flash"];
 
     let best: { polygon: [number, number][]; exclusions: [number, number][][]; confidence: number; notes?: string } | null = null;
     let lastError = "";
 
     for (const model of models) {
       // Pass 1
-      const txt1 = await callModel(model, buildPrompt(width, height, px, py, { hint }), b64, aiKey);
+      const txt1 = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey);
       if (!txt1) { lastError = `${model}: no response`; continue; }
       let parsed = parseJson(txt1);
       if (!parsed?.polygon || !Array.isArray(parsed.polygon) || parsed.polygon.length < 6) {
@@ -263,24 +272,8 @@ Deno.serve(async (req) => {
       else if (area < minArea) failureReason = `polygon too small (${Math.round(area)} px², expected > ${Math.round(minArea)})`;
       else if (area > maxArea) failureReason = `polygon covers nearly the whole crop — likely the wrong region`;
 
-      // Refinement pass on failure or low confidence
       const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0.7;
-      if (failureReason || conf < 0.55) {
-        const reason = failureReason || `low confidence (${conf.toFixed(2)})`;
-        const txt2 = await callModel(model, buildPrompt(width, height, px, py, { hint, previousFailure: reason }), b64, aiKey);
-        if (txt2) {
-          const p2 = parseJson(txt2);
-          if (p2?.polygon && Array.isArray(p2.polygon) && p2.polygon.length >= 6) {
-            const poly2 = dedupeVertices(p2.polygon.map((p: any) => [Math.round(p[0]), Math.round(p[1])] as [number, number]));
-            const area2 = polyAreaPx(poly2);
-            if (pointInPoly(px, py, poly2) && area2 >= minArea && area2 <= maxArea) {
-              parsed = p2;
-              poly = poly2;
-              failureReason = "";
-            }
-          }
-        }
-      }
+      if (!failureReason && conf < 0.45) failureReason = `low confidence (${conf.toFixed(2)})`;
 
       if (failureReason) { lastError = `${model}: ${failureReason}`; continue; }
 
