@@ -618,7 +618,8 @@ export default function GardenSizer() {
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.polygon) {
         const msg = data?.error || response.statusText || "";
-        if (msg.toLowerCase().includes("abort")) toast.error("AI tog for lang tid — prøv et mindre klik midt på plænen eller tegn manuelt");
+        if ((data as any)?.noLawn) toast.error(`Ingen plæne fundet på dette punkt — klik et tydeligt sted på græsset, eller tegn manuelt`);
+        else if (msg.toLowerCase().includes("abort")) toast.error("AI tog for lang tid — prøv et mindre klik midt på plænen eller tegn manuelt");
         else if ((data as any)?.fallback) toast.error("AI-tjenesten er midlertidigt utilgængelig — prøv igen om lidt eller tegn manuelt");
         else toast.error(msg.includes("402") ? "AI-kreditter brugt op" : msg.includes("429") ? "Travl gateway — prøv igen om lidt" : "AI-opmåling fejlede");
         return;
