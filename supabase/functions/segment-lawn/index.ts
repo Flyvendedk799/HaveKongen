@@ -1,4 +1,4 @@
-// segment-lawn v3: high-resolution, reasoning-grounded lawn segmentation.
+// segment-lawn v4: fast, parcel-aware lawn segmentation.
 // Improvements vs v2:
 //  - Pro model first (Gemini 2.5 Pro), flash as fallback
 //  - 1024px crop, 70m default window (~7 cm/px) for sharper boundaries
@@ -61,44 +61,44 @@ function dedupeVertices(poly: [number, number][]): [number, number][] {
 }
 
 async function callModel(model: string, prompt: string, b64: string, aiKey: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const r = await fetch(LOVABLE_API, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
-            ],
-          }],
-        }),
-      });
-      if (r.ok) {
-        const j = await r.json();
-        return j.choices?.[0]?.message?.content ?? "";
-      }
-      if (r.status === 429 || r.status === 402) return null;
-      await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
-    } catch {
-      await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
-    }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 13500);
+  try {
+    const r = await fetch(LOVABLE_API, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        temperature: 0.1,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
+          ],
+        }],
+      }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j.choices?.[0]?.message?.content ?? "";
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
   }
-  return null;
 }
 
-function buildPrompt(width: number, height: number, px: number, py: number, opts: { hint?: string; previousFailure?: string } = {}) {
-  const refineNote = opts.previousFailure
-    ? `\nPREVIOUS ATTEMPT FAILED: ${opts.previousFailure}\nProduce a CORRECTED polygon that addresses the issue.`
-    : "";
+function buildPrompt(width: number, height: number, px: number, py: number, opts: { hint?: string; parcelPixels?: [number, number][] } = {}) {
   const hintNote = opts.hint === "tighter"
     ? "\nBe CONSERVATIVE — only confidently green grass cover."
     : opts.hint === "looser"
       ? "\nBe slightly LOOSER — include grass partially shaded by trees."
       : "";
+  const parcelNote = opts.parcelPixels?.length
+    ? `\nPROPERTY LIMIT: The user's parcel boundary in image pixels is ${JSON.stringify(opts.parcelPixels.slice(0, 80))}. The lawn polygon MUST stay inside this parcel and must not include neighbours.`
+    : "";
 
   return `You are a precise aerial-imagery segmentation engine for Danish residential lawns.
 
@@ -107,7 +107,7 @@ INPUT: A top-down ortophoto, ${width}x${height} pixels. The marker pixel (${px},
 GOAL: Trace the OUTER BOUNDARY of the SINGLE connected lawn region that contains the marker pixel.
 
 INCLUDE: continuous grass, mowed strips, areas with patchy/yellowing grass that are still maintained turf.
-EXCLUDE: buildings, roofs, driveways, parking, gravel/grus, terraces, wooden decks, paved paths, flowerbeds (bede), hedges, individual shrubs, trees with closed canopy, ponds/water, sand pits, bare soil, neighbouring lawns separated by hedge/fence/path.${hintNote}${refineNote}
+EXCLUDE: buildings, roofs, driveways, parking, gravel/grus, terraces, wooden decks, paved paths, flowerbeds (bede), hedges, individual shrubs, trees with closed canopy, ponds/water, sand pits, bare soil, neighbouring lawns separated by hedge/fence/path.${hintNote}${parcelNote}
 
 REASONING: First, mentally identify the boundary by following the lawn's edge clockwise. Stay within 1-2 px of the visible transition. For curved edges use more vertices; for straight edges use fewer.
 
@@ -120,7 +120,7 @@ OUTPUT — STRICT JSON only, no markdown, no commentary:
 }
 
 REQUIREMENTS:
-- polygon: 20-100 integer-pixel vertices, ordered clockwise along the boundary, MUST contain pixel (${px}, ${py}), no self-intersection, vertices in [0,${width}] x [0,${height}].
+- polygon: 8-70 integer-pixel vertices, ordered clockwise along the boundary, MUST contain pixel (${px}, ${py}), no self-intersection, vertices in [0,${width}] x [0,${height}].
 - exclusions: 0-3 inner rings for non-lawn islands inside the main polygon (flowerbeds, ponds). Each 6-30 vertices. Empty array if none obvious.
 - confidence: honest estimate. 0.9+ = boundary unambiguous; 0.6-0.8 = some shaded/occluded edges; <0.6 = significant uncertainty.
 
