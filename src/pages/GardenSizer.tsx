@@ -933,7 +933,7 @@ export default function GardenSizer() {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                  <button className="tool-btn" onClick={loadMatrikel}>Hent matrikel</button>
+                  <button className="tool-btn" onClick={() => loadMatrikel()}>Hent matrikel</button>
                   {matrikel && <button className="tool-btn" onClick={useMatrikelAsBase}>Brug matrikel som plæne</button>}
                   <button className="tool-btn" onClick={() => {
                     if (!navigator.geolocation) { toast("Geolocation ikke tilgængelig"); return; }
