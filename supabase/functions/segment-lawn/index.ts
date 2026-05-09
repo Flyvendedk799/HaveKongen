@@ -252,19 +252,30 @@ Deno.serve(async (req) => {
       ? parcelPolygon.map(ll2px).filter(([x, y]) => x >= -80 && x <= width + 80 && y >= -80 && y <= height + 80)
       : undefined;
 
-    const models = ["google/gemini-2.5-flash", "google/gemini-2.5-pro"];
+    const models: Array<{ id: string; timeout: number }> = [
+      { id: "google/gemini-2.5-flash", timeout: 14000 },
+      { id: "google/gemini-2.5-pro", timeout: 28000 },
+    ];
 
     let best: { polygon: [number, number][]; exclusions: [number, number][][]; confidence: number; notes?: string } | null = null;
     let lastError = "";
+    let noLawnNote: string | null = null;
 
-    for (const model of models) {
-      // Pass 1
-      const txt1 = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey);
+    for (const m of models) {
+      const model = m.id;
+      const txt1 = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey, m.timeout);
       if (!txt1) { lastError = `${model}: no response (timeout or upstream error)`; continue; }
       let parsed = parseJson(txt1);
       if (!parsed) {
         console.warn(`[${model}] unparseable response (first 400 chars):`, txt1.slice(0, 400));
         lastError = `${model}: unparseable response`;
+        continue;
+      }
+      // Model explicitly reports no lawn at click — surface that to the client instead of treating as an AI failure.
+      if (Array.isArray(parsed.polygon) && parsed.polygon.length === 0) {
+        noLawnNote = typeof parsed.notes === "string" ? parsed.notes : "Ingen plæne fundet ved markøren";
+        console.warn(`[${model}] no lawn detected: ${noLawnNote}`);
+        lastError = `${model}: no lawn at click`;
         continue;
       }
       if (!parsed.polygon || !Array.isArray(parsed.polygon) || parsed.polygon.length < 4) {
@@ -275,7 +286,7 @@ Deno.serve(async (req) => {
 
       let poly = dedupeVertices(parsed.polygon.map((p: any) => [Math.round(p[0]), Math.round(p[1])] as [number, number]));
       const area = polyAreaPx(poly);
-      const minArea = (width * height) * 0.005; // > 0.5% of crop
+      const minArea = (width * height) * 0.005;
       const maxArea = (width * height) * 0.95;
       const containsClick = pointInPoly(px, py, poly);
 
@@ -306,6 +317,11 @@ Deno.serve(async (req) => {
     }
 
     if (!best) {
+      if (noLawnNote) {
+        return new Response(JSON.stringify({ error: "no_lawn", detail: noLawnNote, noLawn: true }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ error: "ai failed", detail: lastError, fallback: true }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
