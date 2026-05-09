@@ -11,7 +11,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { unionRings, subtractRings, pixelDistance } from "@/lib/polygonOps";
 import PinpointSequence from "@/components/havemaaler/PinpointSequence";
 
-type Suggestion = { id: string; place_name: string; center: [number, number]; text: string };
+type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" | "mapbox" };
 type LngLat = [number, number];
 type Ring = LngLat[];
 type Mode = "draw" | "exclude" | "edit" | "wand";
@@ -19,6 +19,25 @@ type WandOp = "replace" | "add" | "subtract";
 type Imagery = "ortofoto" | "mapbox";
 
 const AUTOSAVE_KEY = "havemaaler:draft:v2";
+const WAND_CROP_METERS = 36;
+const WAND_IMAGE_SIZE = 768;
+const WAND_TIMEOUT_MS = 18000;
+
+function ringBbox(ring?: Ring | null): [number, number, number, number] | undefined {
+  if (!ring || ring.length < 3) return undefined;
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of ring) {
+    if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+  }
+  return [minLng, minLat, maxLng, maxLat];
+}
+
+function clipBboxToParcel(bbox: [number, number, number, number], parcel?: Ring | null): [number, number, number, number] {
+  const parcelBox = ringBbox(parcel);
+  if (!parcelBox) return bbox;
+  return [Math.max(bbox[0], parcelBox[0]), Math.max(bbox[1], parcelBox[1]), Math.min(bbox[2], parcelBox[2]), Math.min(bbox[3], parcelBox[3])];
+}
 
 const TIERS = [
   { name: "Klipper R1 Mini",   tier: "Indgangsmodel", max: 600,  price: "6.299 kr",  battery: "90 min",  noise: "52 dB" },
@@ -97,13 +116,27 @@ export default function GardenSizer() {
 
   // ----- Geocode (debounced) -----
   useEffect(() => {
-    if (!mapboxToken || query.trim().length < 2) { setSuggestions([]); return; }
+    if (query.trim().length < 2) { setSuggestions([]); return; }
     const t = setTimeout(async () => {
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=dk&language=da&limit=6&access_token=${mapboxToken}`;
+      const dawaUrl = `https://api.dataforsyningen.dk/adresser/autocomplete?q=${encodeURIComponent(query)}&type=adresse&per_side=6`;
       try {
-        const r = await fetch(url); const j = await r.json();
-        setSuggestions((j.features ?? []).map((f: any) => ({
-          id: f.id, place_name: f.place_name, center: f.center as LngLat, text: f.text,
+        const r = await fetch(dawaUrl); const j = await r.json();
+        const exact = (Array.isArray(j) ? j : [])
+          .map((item: any) => item?.adresse)
+          .filter((a: any) => Number.isFinite(a?.x) && Number.isFinite(a?.y))
+          .map((a: any) => ({
+            id: a.id,
+            place_name: `${a.vejnavn} ${a.husnr}, ${a.postnr} ${a.postnrnavn}`,
+            center: [a.x, a.y] as LngLat,
+            text: `${a.vejnavn} ${a.husnr}`,
+            source: "dawa" as const,
+          }));
+        if (exact.length) { setSuggestions(exact); return; }
+        if (!mapboxToken) return;
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=dk&language=da&limit=6&access_token=${mapboxToken}`;
+        const mr = await fetch(url); const mj = await mr.json();
+        setSuggestions((mj.features ?? []).map((f: any) => ({
+          id: f.id, place_name: f.place_name, center: f.center as LngLat, text: f.text, source: "mapbox" as const,
         })));
       } catch { /* ignore */ }
     }, 220);
@@ -123,6 +156,7 @@ export default function GardenSizer() {
     if (imagery === "ortofoto" && ortoCfg) {
       return {
         version: 8,
+        glyphs: "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
         sources: {
           orto: {
             type: "raster",
