@@ -1,211 +1,214 @@
-# Havelandet → Danmarks #1 haveplatform
+# Vandingsplan v2 — "Den komplette have-companion"
 
-Set med iværksætterbriller: I dag har I 4 stærke moduler (Webshop, Havemåler, Vanding, Plantepleje AI) der lever som **øer**. De deler ikke data, har ingen fælles "habit loop", og der er ingen monetiseringsmotor ud over ad-hoc webshop-køb. Konkurrenter (Plantix, PictureThis, GroGuru, danske GreenMate) vinder på **én ting**. I kan vinde Danmark ved at være **det eneste sted** hvor måling → plan → pleje → indkøb er ét loop, krydret med dansk-specifikt indhold (DMI-vejr, kommune-affaldskalender, danske sorter, Have-Selskab-style guides).
+Målet: Gør Vandingsplan til en personlig have-assistent der husker, advarer, lærer og forbinder. Alle nye features samles i tabs på `/vanding` og deler data med resten af platformen.
 
-Nedenfor: hvad der er svagt nu, og hvad der mangler for at blive nr. 1 — prioriteret efter **impact × moat**.
-
----
-
-## 1. Diagnose pr. modul — det som ikke fungerer i dag
-
-### Webshop
-- Ingen **kontekstuel anbefaling** ("Du har roser i bed 3 → her er gødning til dem")
-- Ingen abonnementer/refill (frø-kasser, gødning hver 3. mdr) — stort tabt LTV
-- Ingen reviews, ingen UGC, ingen "købt sammen med"
-- Ingen **plante-shop** — kun produkter. Et havefirma uden planter er som en boghandel uden bøger
-- Ingen leveringsestimat eller fragtbeskeder
-
-### Havemåler
-- Engangsoplevelse — bruges én gang og glemmes
-- Ingen **3D / højde / sol-simulation** (kun 2D polygon) → kan ikke konkurrere med iScape/Garden Planner
-- Ingen "før/efter"-visning eller plantekort på kortet
-- Eksporterer ikke noget (PDF, deling med landskabsarkitekt)
-
-### Vandingsplan
-- Nu OK med planter, men: **ingen rigtig hardware-integration** (Gardena, Husqvarna, Rain Bird, Hunter — alle har APIs)
-- "Vand nu" er stadig en log-knap, ikke en faktisk handling
-- Ingen alert-push når brugeren faktisk skal handle (kun in-app)
-
-### Plantepleje AI
-- Chat er fin, men **kontekstløs** — kender ikke brugerens have, planter, klimazone, sidste vejr
-- Ingen **proaktiv** rådgivning ("Du har æbletræer → tid til at sprøjte mod skurv nu")
-- Ingen billedhistorik pr. plante (sygdomsudvikling over tid)
-- Ingen integration til webshop ud fra diagnose
-
-### På tværs (det største problem)
-- **Ingen daglig grund til at åbne appen.** Et havefirma skal være årstidsdrevet, ikke task-drevet
-- **Ingen community / social** — ingen deling, ingen sammenligning med naboer
-- **Ingen mobile-first** — alt er desktop-præget, men have-arbejde sker udenfor med en telefon
-- **Ingen onboarding-flow der binder modulerne sammen** (mål have → AI foreslår planter → læg i kurv → få vandingsplan)
-
----
-
-## 2. Det manglende rygsøjle-modul: **"Min Have" hub**
-
-Dette er det vigtigste vi mangler. En `/min-have`-side som er **forsiden** efter login, og som binder alt sammen:
+## Nye tabs i Vandingsplan
 
 ```text
-┌─ I dag · 12. maj · 18° / let regn ──────────────┐
-│  3 opgaver venter · Næste vanding kl. 06:30     │
-├─ DAGENS HAVE ───────────────────────────────────┤
-│ ⚠ Tomater i Bed 2 — bladmug-risiko (AI)        │
-│ 💧 Spring vanding over i dag (regn 6mm)         │
-│ 🌱 Tid at så græskar i drivhus (sidste frost)   │
-│ 📦 "Bær-gødning" anbefales → læg i kurv         │
-├─ HAVEN LIGE NU ─────────────────────────────────┤
-│ [Ortofoto med plante-pins]                      │
-│ 124 m² plæne · 18 planter · 4 bede             │
-├─ ÅRSHJUL (sticky) ──────────────────────────────┤
-│ Maj: så, plant ud, beskær syren, gødsk plæne   │
-└─────────────────────────────────────────────────┘
+[ I dag ] [ Planter ] [ Journal ] [ Kalender ] [ Naboer ] [ Indsigt ] [ Enheder ]
 ```
 
-Dette **alene** vil drive 3-5× retention.
+- **I dag** (eksisterende TodayHero) — nu med daglig AI-briefing øverst
+- **Planter** (eksisterende) — udvides med companion-badges
+- **Journal** (NY) — fotodagbog + timeline pr. plante/bed
+- **Kalender** (NY) — så/høst/beskær årshjul
+- **Naboer** (NY) — community feed på postnummer
+- **Indsigt** (eksisterende)
+- **Enheder** (NY) — sensorer & ventiler
 
 ---
 
-## 3. Nye moduler / faner som mangler
+## 1. Companion-planting & samdyrkning
 
-### A. Plantebibliotek (`/planter`) — **moat-builder**
-- Browse 500+ danske planter med filtre (sol, vand, jord, hårdfør zone, blomstringstid)
-- Hver plante: pleje-kalender, danske sorter, sygdomme, companion planting
-- "Tilføj til min have" → opretter automatisk i bed
-- SEO-guld: hver plante = en side, der rangerer på Google
+**Hvad:** Vis hvilke planter der trives/skader hinanden i samme bed. Live-advarsler og forslag.
 
-### B. Årshjul / Have-kalender (`/kalender`)
-- Måned-for-måned hvad der skal gøres baseret på faktiske planter + lokal vejrhistorik
-- Eksport til Google/Apple Calendar
-- Push-notifikationer ("På søndag er det perfekt såvejr")
-- Sammenkobling med opgavelisten
+- Udvid `plants_catalog` med `companion_plants` (findes) + nyt `antagonist_plants` array
+- I `PlantsTab` og `PlantDetailSheet`: companion-badges (grøn ✓ / rød ✗) for andre planter i samme zone
+- Ved tilføj-plante (`AddPlantsDialog`): "Passer godt med dine planter i bedet" sektion
+- AI-kald (`companion-suggest` edge function) genererer forslag baseret på eksisterende planter i bedet
+- Konflikt-banner i bed-kort: "⚠ Tomat + kål trives dårligt sammen"
 
-### C. Skadedyrs- og sygdomsopslag (`/diagnose`)
-- Foto-upload → AI-diagnose (allerede eksisterer i Plantepleje AI, men giv det egen indgang + historik)
-- Database over almindelige danske skadedyr (snegle, bladlus, tomatbladmug)
-- Direkte link til behandlingsprodukter i shoppen → **konvertering**
+## 2. Have-journal & timeline
 
-### D. Plæne-modul (`/plaene`)
-- Højdeprofil, klippe-frekvens-anbefaling
-- Robotklipper-status (Husqvarna/Gardena API)
-- Gødnings-kalender (NPK-plan, 4× året)
-- Mos/ukrudt-diagnose via foto
+**Hvad:** Fotodagbog pr. plante/bed med vækst-tracking og før/efter-slider.
 
-### E. Drivhus & inventar (`/drivhus`)
-- Hvis bruger har drivhus-zone: temperatur-log, sensorer
-- Frø-inventar (hvad har jeg, hvornår udløber det)
-- Sætteplan ("Du sår tomat 10. marts → planter ud 15. maj")
+Ny tabel `garden_journal`:
+- `id, user_id, garden_id, zone_id, plant_id, kind` (`photo|note|harvest|disease|milestone`)
+- `image_url, caption, data jsonb, created_at`
 
-### F. Community / "Have-tråden" (`/feed`)
-- Brugerne deler "før/efter", spørger om diagnose
-- Like, kommentar, følg naboer i samme postnummer
-- **Eksperter** (gartnere, havearkitekter) svarer mod betaling → marketplace
+Ny komponent `JournalTab.tsx`:
+- Vertikal timeline grupperet pr. uge
+- Filter: alle / pr. plante / pr. bed / kun fotos
+- "Tilføj entry"-FAB med kamera + tekst
+- Auto-entries: når bruger logger vanding, høst eller AI-diagnose → entry oprettes
 
-### G. Have-marketplace
-- Lokale gartnere, anlægs-firmaer, robotklipper-service
-- Provision pr. booking → ny indtægtskilde
-- Kun verificerede DK-firmaer
+Pr. plante i `PlantDetailSheet`:
+- Ny "Journal"-fane med foto-grid
+- Før/efter slider (første foto vs. seneste)
+- Højde/antal-tracker over tid (chart)
 
-### H. Onboarding-flow (kritisk)
-Et 90-sekunders flow ved første login:
-1. Adresse → vejrzone, jordtype, frost-datoer (DMI)
-2. Mål haven (havemåler — auto)
-3. AI foreslår 5 planter til din zone
-4. Sæt vandingsplan automatisk
-5. Få første opgaveliste
+Storage: genbrug `plant-photos` bucket, ny mappe `journal/`.
 
----
+## 3. Høst- & så-kalender
 
-## 4. Forretningsmodel — fra ad-hoc til **moat**
+**Hvad:** Personligt årshjul med opgaver pr. plante baseret på `sow_months`/`harvest_months` + DK-klima.
 
-### Indtægtskilder vi mangler
-| Kilde | Potentiale | Implementering |
-|---|---|---|
-| **Havelandet+** abonnement (49 kr/md) | Kerne — 30%+ af LTV | AI-features, ubegrænset diagnoser, premium guides, ingen ads |
-| **Frø/plante-abonnement** (sæsonkasse) | Høj retention | Forår/sommer/efterår-kasse leveret |
-| **Refill-abonnement** (gødning, jord) | Recurring | Auto-shipment hver X uger |
-| **Marketplace-provision** (gartnere) | Skalerbar | 10-15% pr. booking |
-| **Affiliate** (planteskoler vi ikke selv leverer) | Lavt arbejde | Partnerskab Plantorama m.fl. |
-| **Hardware-bundles** (sensorer, robotklipper) | Høj AOV | White-label sensor + app-pairing |
+Ny komponent `CalendarTab.tsx`:
+- 12-måneders cirkel-/grid-visning af årshjul
+- Pr. plante i brugerens have: så-vindue, udplant, beskær, høst, vinterbeskyt
+- Klik på opgave → opret task i `task_log` (eksisterer)
+- Push/notifikation 2 dage før via eksisterende `notifications` tabel
 
-### Loyalty
-- "Have-point" pr. opgave hak/køb → rabat
-- Streak-system ("47 dage have-helt") — gamification
+Udvid `plants_catalog`:
+- `prikle_weeks_after_sow int`, `transplant_months int[]`, `prune_months int[]`, `winterize_months int[]`
 
----
+Ny edge function `seasonal-tasks-generate`:
+- Kører ugentligt via pg_cron
+- Genererer tasks for kommende uge baseret på brugerens planter + region
 
-## 5. Dansk-specifikke moats konkurrenter ikke kan matche
+## 4. Naboer & community (privat-først)
 
-1. **DMI vejr-integration** (10-dages, lokalt postnummer, frost-varsel)
-2. **DAWA + matrikel** (kender din præcise grund — allerede in!)
-3. **Kommune-affaldskalender** (haveaffald-uger, kompost-tilladelser)
-4. **Danske plantesorter** ('Discovery' æbler, 'Ribston' osv.)
-5. **Fredede arter / invasive** (Rynket Rose-advarsel, bjørneklo-rapportering til kommune)
-6. **Hårdførhedszoner DK** (zone 1-4, ikke US-zoner som PictureThis bruger)
-7. **Dansk på dansk** — al AI på dansk, ikke oversat
-8. **Have-Selskabet-style indhold** — månedsguides, partnerskab evt.
+**Hvad:** Følg haver i samme postnummer, del tips, bytte frø/stiklinger.
 
----
+Nye tabeller:
+- `neighbor_posts` — `id, user_id, postal_code, kind` (`tip|harvest|swap|question`), `title, body, image_url, created_at`
+- `neighbor_comments` — `id, post_id, user_id, body, created_at`
+- `neighbor_likes` — `id, post_id, user_id`
+- `seed_swaps` — `id, user_id, postal_code, plant_slug, kind` (`offer|want`), `qty, notes, status`
 
-## 6. UX / platform-niveau forbedringer
+RLS: alle kan læse posts hvor `postal_code` matcher brugerens (fra `profiles`); kun ejer kan redigere/slette.
 
-- **Mobile-først PWA** — installerbar, offline-kalender, kamera-direct-til-diagnose
-- **Push-notifikationer** (regn-skip, tid at så, ordre afsendt)
-- **Kommandopalette** (⌘K findes — udvid med actions, ikke kun navigation)
-- **Delbare links** ("Se min have" → læselig offentlig side, lead-magnet)
-- **Dark mode** — udendørs i sol
-- **Tilgængelighed** — store touch targets, høj kontrast (mange brugere er 50+)
-- **Onboarding tooltips** (Shepherd.js) første gang hver feature bruges
-- **Konsolideret navigation** — i dag 4 toplinks. Bør være: Min Have · Planter · Webshop · Mere ▾
+Ny komponent `NeighborsTab.tsx`:
+- Feed filtreret på postnummer (radius dropdown: 0/5/10 km via lat/lng)
+- Kompose-knap (tip/spørgsmål/byttebørs)
+- "Aktive haver i nærheden" tæller
+- Privat have-deling: invitér via email → `garden_collaborators` tabel (`role: viewer|editor`)
 
----
+Moderation: rapportér-knap → admin queue (`admin/moderation` route, senere).
 
-## 7. Vækst-motorer (det glemte)
+## 5. Proaktiv AI-coach + global have-chat
 
-- **SEO-fundament**: hver plante, hvert skadedyr, hver "hvordan beskærer jeg X" = en landingsside
-- **Email-sekvens**: "Din have i maj" månedlig mail (genåbnings-trigger)
-- **Referral**: "Inviter en have-ven, få 50 kr"
-- **Indhold**: ugentlig blog/video — gartner som ansigt
-- **Partnerskaber**: BoligMagasinet, Have-Selskabet, danske planteskoler
-- **Lokale events**: "Havelandet-dag" hos planteskoler (offline → online)
+**Daglig briefing (kl. 07:00 lokal):**
+- Edge function `daily-briefing` (cron) genererer pr. bruger:
+  - Dagens vejr-resume
+  - Planlagte vandinger i dag
+  - Top-3 opgaver fra `task_log`
+  - Advarsler (frost, hede, sygdomsrisiko)
+  - 1 sæson-tip
+- Skrives til `notifications` + ny `daily_briefings` tabel (cache så bruger kan se historik)
+- "Morgen-kort" øverst på `I dag`-tab
 
----
+**Global have-chat:**
+- Genbrug eksisterende `chat_conversations` + `chat_messages` (allerede i DB)
+- Ny edge function `garden-chat` (streaming) — system-prompt indeholder:
+  - Have-metadata (zoner, planter, vejr, seneste vandinger, aktuelle tasks)
+  - Memory: sidste N samtaler
+- Floating chat-bubble på `/vanding` (alle tabs)
+- Tools (function calling): `add_task`, `log_watering`, `add_journal_entry`, `lookup_plant`
 
-## 8. Anbefalet rækkefølge (12-ugers roadmap)
+## 6. IoT — sensorer & ventiler
 
-**Fase 1 — Fundamentet (uge 1-3)**
-1. `/min-have` hub-forside med dagens opgaver
-2. Onboarding-flow der binder modulerne sammen
-3. Notifikationer (push + email)
-4. Mobile/PWA polish
+**Hvad:** Ægte data fra jordfugt-sensorer + automatisk styring af smart-ventiler.
 
-**Fase 2 — Indhold-moat (uge 4-7)**
-5. Plantebibliotek med 200 danske arter (SEO-sider)
-6. Årshjul / kalender-modul
-7. Skadedyrs-database
-8. Hver plante kobler til webshop-produkter (gødning, redskaber)
+Udvid `devices` tabel (eksisterer):
+- `kind` enum allerede der — tilføj `moisture_sensor`, `valve`, `rain_gauge`, `weather_station`
+- `vendor text` (`gardena|hunter|ecowitt|xiaomi|generic-mqtt`)
+- `external_id text`, `auth jsonb` (krypteret token), `zone_id uuid`
 
-**Fase 3 — Monetisering (uge 8-10)**
-9. Havelandet+ abonnement (Stripe)
-10. Frø-kasse abonnement
-11. Wishlist → auto-genbestilling
+Ny tabel `sensor_readings`:
+- `id, device_id, user_id, zone_id, metric` (`moisture_pct|temp|ec|ph|battery|rain_mm`)
+- `value numeric, recorded_at`
+- Indeks: `(zone_id, metric, recorded_at desc)`
 
-**Fase 4 — Moat (uge 11-12+)**
-12. Community feed
-13. Marketplace-MVP (3-5 gartnere)
-14. Hardware-integrationer (Gardena først)
+Ny tabel `valve_commands`:
+- `id, device_id, user_id, action` (`open|close`), `duration_min, status, sent_at, ack_at`
+
+Edge functions:
+- `iot-ingest` — generisk POST endpoint (HMAC-signeret) til at modtage sensor-data fra hub/bridge
+- `iot-gardena` — OAuth-flow + poll Gardena Smart System API
+- `iot-ecowitt` — webhook-modtager for Ecowitt vejrstationer
+- `valve-command` — sender kommando til ventil + opdaterer `valve_commands`
+- Genbrug `generate-watering-plan` — hvis zone har sensor: brug aktuel jordfugt i stedet for kun ET₀-modellen
+
+Ny komponent `DevicesTab.tsx`:
+- Liste af enheder grupperet på zone
+- "Tilføj enhed"-wizard: vælg vendor → OAuth/API-key → vælg zone
+- Live-graf (jordfugt sidste 7 dage) pr. sensor — genbruger Recharts
+- Manuel "Åbn ventil 10 min"-knap
+
+`MoistureGauge` får nyt prop `liveSensorValue` der overrider model-estimat når tilgængeligt.
 
 ---
 
-## 9. Hvad jeg foreslår vi gør **i næste loop**
+## Datamodel-ændringer (oversigt)
 
-Ikke alt på én gang. Vælg én af disse som første konkrete sprint:
+```text
+plants_catalog        + antagonist_plants, prikle_weeks_after_sow,
+                        transplant_months, prune_months, winterize_months
+garden_journal        NY
+neighbor_posts        NY
+neighbor_comments     NY
+neighbor_likes        NY
+seed_swaps            NY
+garden_collaborators  NY
+daily_briefings       NY
+sensor_readings       NY
+valve_commands        NY
+devices               + vendor, external_id, auth
+```
 
-**A. "Min Have" hub-forside** — højeste retention-impact, 3-4 dages arbejde
-**B. Plantebibliotek + SEO** — højeste vækst-impact, 1 uges arbejde
-**C. Onboarding-flow** — højeste konvertering-impact, 2 dage
-**D. Havelandet+ abonnement** — højeste revenue-impact, 3 dage
+Alle nye user-tabeller får RLS `auth.uid() = user_id` (community-tabeller får `postal_code`-baseret read policy via security-definer-funktion `same_postal(_uid uuid, _post text)`).
 
-Min anbefaling som iværksætter: **A først** (forsiden er der brugeren lander efter login — uden den er resten ligegyldigt), derefter **C** (få nye brugere helt igennem), så **B** (vækstmotor), så **D** (når retention er bevist).
+## Nye edge functions
 
----
+```text
+companion-suggest         AI: companion-forslag for et bed
+seasonal-tasks-generate   Cron: ugentlig task-generering
+daily-briefing            Cron: morgen-briefing pr. bruger
+garden-chat               Streaming AI med tools
+iot-ingest                Generisk sensor-modtager (HMAC)
+iot-gardena               Gardena OAuth + poll
+iot-ecowitt               Ecowitt webhook
+valve-command             Send ventil-kommando
+neighbor-moderate         AI-tjek af nye posts (spam/abuse)
+```
 
-Hvilken vil du have vi tager først? Eller skal vi køre A+C i samme sprint?
+## Implementeringsrækkefølge (faser)
+
+**Fase 1 — Companion + Journal** (mest værdi, lav risiko)
+1. Migration: catalog-felter + `garden_journal` tabel
+2. Companion-badges i Plants/Detail/AddPlants
+3. JournalTab + foto-upload + auto-entries
+
+**Fase 2 — Sæson-kalender + proaktiv AI**
+4. Catalog-udvidelser (sow/transplant/prune/winterize)
+5. CalendarTab + `seasonal-tasks-generate` cron
+6. `daily-briefing` cron + morgen-kort + `daily_briefings` tabel
+7. Global `garden-chat` med tools + floating bubble
+
+**Fase 3 — Naboer**
+8. Migration: 4 community-tabeller + `same_postal` helper
+9. NeighborsTab feed + kompose + likes/kommentarer
+10. Seed-swap UI + `garden_collaborators` invitér-flow
+11. `neighbor-moderate` AI-filter
+
+**Fase 4 — IoT**
+12. Migration: device-felter + `sensor_readings` + `valve_commands`
+13. DevicesTab + `iot-ingest` + manual valve control
+14. Gardena OAuth integration (kræver Gardena API key fra bruger via `add_secret`)
+15. Ecowitt webhook + integrér jordfugt i `generate-watering-plan`
+
+## Sikkerheds-noter
+
+- IoT-tokens krypteres via Vault eller mindst markeres så de aldrig sendes til frontend
+- Community RLS bruger `security definer`-funktion for at undgå rekursive policies
+- `valve-command` rate-limit pr. enhed (max 1 åbning/5 min)
+- AI-tools i `garden-chat` validerer alt input server-side før DB-writes
+- Naboer-feed kræver verificeret postnummer på `profiles`
+
+## Hvad jeg vil bekræfte før Fase 4
+
+- Hvilke IoT-vendors prioriteres først? (foreslår Gardena + Ecowitt — bredest i DK)
+- OK at bede om Gardena API-key via secret når vi når dertil?
+
+Klar til at implementere Fase 1 så snart du godkender.

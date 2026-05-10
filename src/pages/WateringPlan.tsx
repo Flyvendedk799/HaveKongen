@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout } from "lucide-react";
+import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout, NotebookPen } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -32,6 +32,7 @@ import InsightsTab from "@/components/watering/InsightsTab";
 import PlantsTab from "@/components/watering/PlantsTab";
 import PlantDetailSheet from "@/components/watering/PlantDetailSheet";
 import IdentifyPlantDialog from "@/components/watering/IdentifyPlantDialog";
+import JournalTab, { logJournal } from "@/components/watering/JournalTab";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -88,8 +89,8 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  const [view, setView] = useState<"cards" | "plants" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
-  function setViewPersist(v: "cards" | "plants" | "calendar" | "coach" | "insights") {
+  const [view, setView] = useState<"cards" | "plants" | "journal" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
+  function setViewPersist(v: "cards" | "plants" | "journal" | "calendar" | "coach" | "insights") {
     setView(v); localStorage.setItem("watering.view", v);
   }
   function snoozeOn(scheduleId: string, dateISO: string) {
@@ -561,6 +562,7 @@ export default function WateringPlan() {
             {([
               { k: "cards", label: "Bede", icon: LayoutGrid },
               { k: "plants", label: "Planter", icon: Sprout },
+              { k: "journal", label: "Journal", icon: NotebookPen },
               { k: "calendar", label: "Kalender", icon: CalendarDays },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
@@ -594,6 +596,11 @@ export default function WateringPlan() {
             onAddToZone={(z) => setAddPlantsZone(z as ZoneRow)}
             onIdentify={() => setIdentifyOpen(true)}
           />
+        )}
+
+        {/* Journal view */}
+        {garden && view === "journal" && (
+          <JournalTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} />
         )}
 
         {/* Seasonal coach view */}
@@ -753,8 +760,9 @@ export default function WateringPlan() {
       <PlantDetailSheet
         plant={openPlant?.plant ?? null}
         zoneName={openPlant?.zoneName ?? ""}
-        zone={openPlant ? zones.find(z => z.id === openPlant.zoneId) ?? null : null}
-        zones={zones.map(z => ({ id: z.id, name: z.name }))}
+          zone={openPlant ? zones.find(z => z.id === openPlant.zoneId) ?? null : null}
+          zones={zones.map(z => ({ id: z.id, name: z.name }))}
+          bedPlants={openPlant ? (plantsByZone[openPlant.zoneId] ?? []) : []}
         onOpenChange={(v) => !v && setOpenPlant(null)}
         onUpdated={(id, patch) => updatePlantLocal(id, patch as any)}
         onRemoved={(id) => removePlantLocal(id)}

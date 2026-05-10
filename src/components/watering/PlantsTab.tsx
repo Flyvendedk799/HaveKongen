@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Leaf, Droplets, MoreHorizontal, Sparkles } from "lucide-react";
+import { Search, Plus, Leaf, Droplets, MoreHorizontal, Sparkles, AlertTriangle, HeartHandshake } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { ZonePlant } from "./PlantChips";
+import { getCompanionMaps, detectConflicts, type CompanionMap } from "@/lib/companion";
 
 type Zone = { id: string; name: string; sun_exposure?: string | null };
 
@@ -33,6 +34,29 @@ export default function PlantsTab({
     const distinct = new Set(allPlants.map(x => x.plant.plant_slug || x.plant.custom_name)).size;
     return { totalQty, high, distinct, beds: zones.length };
   }, [allPlants, zones]);
+
+  // Companion data
+  const allSlugs = useMemo(() => {
+    const s = new Set<string>();
+    for (const x of allPlants) if (x.plant.plant_slug) s.add(x.plant.plant_slug);
+    return Array.from(s);
+  }, [allPlants]);
+  const [companion, setCompanion] = useState<CompanionMap | null>(null);
+  useEffect(() => {
+    if (allSlugs.length === 0) { setCompanion(null); return; }
+    getCompanionMaps(allSlugs).then(setCompanion).catch(() => setCompanion(null));
+  }, [allSlugs.join("|")]);
+
+  const conflictsByZone = useMemo(() => {
+    const out: Record<string, ReturnType<typeof detectConflicts>> = {};
+    if (!companion) return out;
+    for (const z of zones) {
+      const slugs = (plantsByZone[z.id] ?? []).map(p => p.plant_slug).filter(Boolean) as string[];
+      const c = detectConflicts(slugs, companion);
+      if (c.length) out[z.id] = c;
+    }
+    return out;
+  }, [companion, zones, plantsByZone]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -117,7 +141,9 @@ export default function PlantsTab({
         <div className="water-card text-center text-sm text-muted-foreground" style={{ padding: 24 }}>
           Ingen match for "{q}".
         </div>
-      ) : grouped.map(({ zone, plants }) => (
+      ) : grouped.map(({ zone, plants }) => {
+        const zoneConflicts = conflictsByZone[zone.id] ?? [];
+        return (
         <div key={zone.id} className="water-card" style={{ padding: 18 }}>
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -130,6 +156,18 @@ export default function PlantsTab({
               <Plus size={14} className="mr-1" />Tilføj
             </Button>
           </div>
+          {zoneConflicts.length > 0 && (
+            <div className="mb-3 rounded-lg p-2.5 flex items-start gap-2"
+              style={{ background: "#fef3c7", border: "1px solid #fcd34d" }}>
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" style={{ color: "#92400e" }} />
+              <div className="text-xs" style={{ color: "#78350f" }}>
+                <strong>Trives dårligt sammen:</strong>{" "}
+                {zoneConflicts.map((c, i) => (
+                  <span key={i}>{i > 0 && ", "}{c.aName} + {c.bName}</span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <AnimatePresence initial={false}>
               {plants.map(p => (
@@ -173,7 +211,7 @@ export default function PlantsTab({
             </AnimatePresence>
           </div>
         </div>
-      ))}
+      );})}
     </div>
   );
 }

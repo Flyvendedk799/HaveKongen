@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import { uploadPlantPhoto } from "@/lib/plantPhotos";
+import { getCompanionMaps, relationFor, type CompanionMap } from "@/lib/companion";
+import { Check, X as XIcon } from "lucide-react";
 import type { ZonePlant } from "./PlantChips";
 
 type CatalogDetail = {
@@ -22,6 +24,7 @@ type CatalogDetail = {
   sow_months: number[] | null;
   harvest_months: number[] | null;
   companion_plants: string[] | null;
+  antagonist_plants: string[] | null;
   frost_risk: string | null;
   image_url: string | null;
 };
@@ -30,12 +33,13 @@ const MONTHS = ["jan","feb","mar","apr","maj","jun","jul","aug","sep","okt","nov
 const QUICK_QS = ["Hvornår skal jeg vande?", "Hvordan beskærer jeg?", "Hvilke skadedyr?", "Gødning?"];
 
 export default function PlantDetailSheet({
-  plant, zoneName, zone, zones, onOpenChange, onUpdated, onRemoved, onMoved,
+  plant, zoneName, zone, zones, bedPlants = [], onOpenChange, onUpdated, onRemoved, onMoved,
 }: {
   plant: (ZonePlant & { planted_at?: string | null; notes?: string | null; image_url?: string | null }) | null;
   zoneName: string;
   zone?: { id: string; name: string; sun_exposure?: string | null; soil?: string | null } | null;
   zones: { id: string; name: string }[];
+  bedPlants?: ZonePlant[];
   onOpenChange: (v: boolean) => void;
   onUpdated: (id: string, patch: { qty?: number; custom_name?: string | null; planted_at?: string | null; notes?: string | null; image_url?: string | null }) => void;
   onRemoved: (id: string) => void;
@@ -59,6 +63,9 @@ export default function PlantDetailSheet({
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // companion
+  const [companion, setCompanion] = useState<CompanionMap | null>(null);
+
   useEffect(() => {
     if (!plant) return;
     setQty(plant.qty);
@@ -71,10 +78,16 @@ export default function PlantDetailSheet({
     setAnswer(""); setQuestion(""); setAskOpen(false);
     if (plant.plant_slug) {
       supabase.from("plants_catalog")
-        .select("slug,name_da,latin,category,water_need,sun,description,sow_months,harvest_months,companion_plants,frost_risk,image_url")
+        .select("slug,name_da,latin,category,water_need,sun,description,sow_months,harvest_months,companion_plants,antagonist_plants,frost_risk,image_url")
         .eq("slug", plant.plant_slug).maybeSingle()
         .then(({ data }) => setDetail(data as any));
     }
+    const slugs = Array.from(new Set([
+      plant.plant_slug,
+      ...bedPlants.map(p => p.plant_slug),
+    ].filter(Boolean) as string[]));
+    if (slugs.length) getCompanionMaps(slugs).then(setCompanion).catch(() => setCompanion(null));
+    else setCompanion(null);
   }, [plant?.id]);
 
   if (!plant) return null;
@@ -256,6 +269,32 @@ export default function PlantDetailSheet({
             )}
           </div>
         )}
+
+        {/* Naboer i bedet */}
+        {plant.plant_slug && companion && bedPlants.length > 1 && (() => {
+          const others = Array.from(new Set(bedPlants.map(p => p.plant_slug).filter(Boolean) as string[]));
+          const rels = relationFor(plant.plant_slug!, others, companion);
+          if (rels.length === 0) return null;
+          return (
+            <div className="mt-4 rounded-xl border p-3" style={{ borderColor: "rgba(20,39,29,0.08)" }}>
+              <div className="flex items-center gap-1.5 text-sm font-medium mb-2">
+                <Leaf size={14} /> Naboer i {zoneName}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {rels.map(r => (
+                  <span key={r.slug} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full"
+                    style={{
+                      background: r.rel === "friend" ? "#dcfce7" : r.rel === "foe" ? "#fee2e2" : "rgba(20,39,29,0.05)",
+                      color: r.rel === "friend" ? "#166534" : r.rel === "foe" ? "#991b1b" : "var(--ink-500)",
+                    }}>
+                    {r.rel === "friend" ? <Check size={11} /> : r.rel === "foe" ? <XIcon size={11} /> : null}
+                    {r.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* AI Coach */}
         <div className="mt-5 rounded-xl border p-3" style={{ borderColor: "rgba(20,39,29,0.08)", background: "linear-gradient(135deg,#f7fbf6,#eef5ff)" }}>

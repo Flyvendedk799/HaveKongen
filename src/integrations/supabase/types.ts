@@ -216,6 +216,45 @@ export type Database = {
           },
         ]
       }
+      garden_journal: {
+        Row: {
+          caption: string | null
+          created_at: string
+          data: Json
+          garden_id: string | null
+          id: string
+          image_url: string | null
+          kind: string
+          plant_id: string | null
+          user_id: string
+          zone_id: string | null
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          data?: Json
+          garden_id?: string | null
+          id?: string
+          image_url?: string | null
+          kind?: string
+          plant_id?: string | null
+          user_id: string
+          zone_id?: string | null
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          data?: Json
+          garden_id?: string | null
+          id?: string
+          image_url?: string | null
+          kind?: string
+          plant_id?: string | null
+          user_id?: string
+          zone_id?: string | null
+        }
+        Relationships: []
+      }
       garden_zones: {
         Row: {
           area_m2: number | null
@@ -518,6 +557,7 @@ export type Database = {
       }
       plants_catalog: {
         Row: {
+          antagonist_plants: string[] | null
           category: string | null
           companion_plants: string[] | null
           created_at: string
@@ -537,6 +577,7 @@ export type Database = {
           water_need: string | null
         }
         Insert: {
+          antagonist_plants?: string[] | null
           category?: string | null
           companion_plants?: string[] | null
           created_at?: string
@@ -556,6 +597,7 @@ export type Database = {
           water_need?: string | null
         }
         Update: {
+          antagonist_plants?: string[] | null
           category?: string | null
           companion_plants?: string[] | null
           created_at?: string
