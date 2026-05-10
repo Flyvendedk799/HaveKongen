@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Leaf, Droplets, MoreHorizontal, Sparkles } from "lucide-react";
+import { Search, Plus, Leaf, Droplets, MoreHorizontal, Sparkles, AlertTriangle, HeartHandshake } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { ZonePlant } from "./PlantChips";
+import { getCompanionMaps, detectConflicts, type CompanionMap } from "@/lib/companion";
 
 type Zone = { id: string; name: string; sun_exposure?: string | null };
 
