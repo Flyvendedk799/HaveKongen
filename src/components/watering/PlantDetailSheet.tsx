@@ -63,6 +63,9 @@ export default function PlantDetailSheet({
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // companion
+  const [companion, setCompanion] = useState<CompanionMap | null>(null);
+
   useEffect(() => {
     if (!plant) return;
     setQty(plant.qty);
@@ -75,10 +78,16 @@ export default function PlantDetailSheet({
     setAnswer(""); setQuestion(""); setAskOpen(false);
     if (plant.plant_slug) {
       supabase.from("plants_catalog")
-        .select("slug,name_da,latin,category,water_need,sun,description,sow_months,harvest_months,companion_plants,frost_risk,image_url")
+        .select("slug,name_da,latin,category,water_need,sun,description,sow_months,harvest_months,companion_plants,antagonist_plants,frost_risk,image_url")
         .eq("slug", plant.plant_slug).maybeSingle()
         .then(({ data }) => setDetail(data as any));
     }
+    const slugs = Array.from(new Set([
+      plant.plant_slug,
+      ...bedPlants.map(p => p.plant_slug),
+    ].filter(Boolean) as string[]));
+    if (slugs.length) getCompanionMaps(slugs).then(setCompanion).catch(() => setCompanion(null));
+    else setCompanion(null);
   }, [plant?.id]);
 
   if (!plant) return null;
