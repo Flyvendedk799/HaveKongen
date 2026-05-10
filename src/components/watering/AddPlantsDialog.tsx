@@ -18,6 +18,8 @@ export type CatalogPlant = {
   image_url: string | null;
 };
 
+type WaterFilter = "all" | "high" | "medium" | "low";
+
 export default function AddPlantsDialog({
   open,
   onOpenChange,
@@ -37,6 +39,9 @@ export default function AddPlantsDialog({
   const [picks, setPicks] = useState<Record<string, number>>({});
   const [customName, setCustomName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [category, setCategory] = useState<string>("all");
+  const [water, setWater] = useState<WaterFilter>("all");
+  const [matchSun, setMatchSun] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -51,26 +56,27 @@ export default function AddPlantsDialog({
   }, [open]);
 
   useEffect(() => {
-    if (!open) { setQ(""); setPicks({}); setCustomName(""); }
+    if (!open) { setQ(""); setPicks({}); setCustomName(""); setCategory("all"); setWater("all"); setMatchSun(true); }
   }, [open]);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    catalog.forEach(p => p.category && set.add(p.category));
+    return ["all", ...Array.from(set).sort()];
+  }, [catalog]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    let list = catalog;
-    if (ql) {
-      list = list.filter(p =>
-        p.name_da.toLowerCase().includes(ql) ||
+    return catalog.filter(p => {
+      if (category !== "all" && p.category !== category) return false;
+      if (water !== "all" && p.water_need !== water) return false;
+      if (matchSun && zoneSun && p.sun && p.sun !== zoneSun && p.sun !== "any") return false;
+      if (!ql) return true;
+      return p.name_da.toLowerCase().includes(ql) ||
         (p.latin || "").toLowerCase().includes(ql) ||
-        (p.category || "").toLowerCase().includes(ql)
-      );
-    }
-    return list.slice(0, 60);
-  }, [catalog, q]);
-
-  const suggestions = useMemo(() => {
-    if (q || !zoneSun) return [];
-    return catalog.filter(p => !p.sun || p.sun === zoneSun || p.sun === "any").slice(0, 6);
-  }, [catalog, q, zoneSun]);
+        (p.category || "").toLowerCase().includes(ql);
+    }).slice(0, 80);
+  }, [catalog, q, category, water, matchSun, zoneSun]);
 
   const totalPicks = Object.values(picks).reduce((a, b) => a + b, 0);
 
@@ -144,27 +150,47 @@ export default function AddPlantsDialog({
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søg plante (tomat, rose, basilikum…)" style={{ paddingLeft: 34 }} />
         </div>
 
+        {/* Filter chips */}
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          <select value={category} onChange={e => setCategory(e.target.value)}
+            className="text-xs rounded-full px-3 py-1 border bg-white"
+            style={{ borderColor: "rgba(20,39,29,0.15)" }}>
+            {categories.map(c => <option key={c} value={c}>{c === "all" ? "Alle kategorier" : c}</option>)}
+          </select>
+          {(["all", "high", "medium", "low"] as WaterFilter[]).map(w => (
+            <button key={w} onClick={() => setWater(w)}
+              className="text-xs rounded-full px-3 py-1 border"
+              style={{
+                borderColor: water === w ? "var(--forest-800)" : "rgba(20,39,29,0.15)",
+                background: water === w ? "var(--forest-800)" : "white",
+                color: water === w ? "white" : "var(--ink-900)",
+              }}>
+              {w === "all" ? "Alt vand" : w === "high" ? "💧💧💧" : w === "low" ? "💧" : "💧💧"}
+            </button>
+          ))}
+          {zoneSun && (
+            <button onClick={() => setMatchSun(v => !v)}
+              className="text-xs rounded-full px-3 py-1 border"
+              style={{
+                borderColor: matchSun ? "var(--forest-800)" : "rgba(20,39,29,0.15)",
+                background: matchSun ? "var(--forest-800)" : "white",
+                color: matchSun ? "white" : "var(--ink-900)",
+              }}>
+              ☀ Match {zoneSun === "sun" ? "fuld sol" : zoneSun === "shade" ? "skygge" : "delvis"}
+            </button>
+          )}
+        </div>
+
         <div style={{ maxHeight: 360, overflow: "auto", display: "grid", gap: 6, marginTop: 8 }}>
           {loading && <div style={{ textAlign: "center", padding: 20, color: "var(--ink-500)", fontSize: 13 }}>Henter katalog…</div>}
-          {!loading && suggestions.length > 0 && (
-            <>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-500)", padding: "6px 4px 0" }}>
-                Forslag til {zoneSun === "sun" ? "fuld sol" : zoneSun === "shade" ? "skygge" : "delvis sol"}
-              </div>
-              {suggestions.map(renderRow)}
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-500)", padding: "10px 4px 0" }}>
-                Alle planter
-              </div>
-            </>
-          )}
           {!loading && filtered.map(renderRow)}
           {!loading && filtered.length === 0 && (
-            <div style={{ textAlign: "center", padding: 20, color: "var(--ink-500)", fontSize: 13 }}>Ingen match.</div>
+            <div style={{ textAlign: "center", padding: 20, color: "var(--ink-500)", fontSize: 13 }}>Ingen match. Prøv at slå sol-filteret fra.</div>
           )}
         </div>
 
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(20,39,29,0.08)" }}>
-          <div style={{ fontSize: 11, color: "var(--ink-500)", marginBottom: 6 }}>Egen plante</div>
+          <div style={{ fontSize: 11, color: "var(--ink-500)", marginBottom: 6 }}>Egen plante (ikke i kataloget)</div>
           <div style={{ display: "flex", gap: 6 }}>
             <Leaf size={16} style={{ alignSelf: "center", color: "var(--ink-500)" }} />
             <Input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="fx 'Mormors rosenbusk'" />

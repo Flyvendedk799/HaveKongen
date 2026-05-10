@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3 } from "lucide-react";
+import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -29,6 +29,8 @@ import PlantChips, { ZonePlant } from "@/components/watering/PlantChips";
 import AddPlantsDialog from "@/components/watering/AddPlantsDialog";
 import QuickWaterDialog from "@/components/watering/QuickWaterDialog";
 import InsightsTab from "@/components/watering/InsightsTab";
+import PlantsTab from "@/components/watering/PlantsTab";
+import PlantDetailSheet from "@/components/watering/PlantDetailSheet";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -70,6 +72,7 @@ export default function WateringPlan() {
   const [plantsByZone, setPlantsByZone] = useState<Record<string, ZonePlant[]>>({});
   const [addPlantsZone, setAddPlantsZone] = useState<ZoneRow | null>(null);
   const [quickWaterZone, setQuickWaterZone] = useState<ZoneRow | null>(null);
+  const [openPlant, setOpenPlant] = useState<{ plant: ZonePlant; zoneName: string } | null>(null);
 
   // pause + snooze + alert state (persisted to localStorage)
   const [pauseUntil, setPauseUntilState] = useState<Date | null>(() => {
@@ -83,8 +86,8 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  const [view, setView] = useState<"cards" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
-  function setViewPersist(v: "cards" | "calendar" | "coach" | "insights") {
+  const [view, setView] = useState<"cards" | "plants" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
+  function setViewPersist(v: "cards" | "plants" | "calendar" | "coach" | "insights") {
     setView(v); localStorage.setItem("watering.view", v);
   }
   function snoozeOn(scheduleId: string, dateISO: string) {
@@ -137,7 +140,7 @@ export default function WateringPlan() {
           supabase.from("watering_events").select("*")
             .eq("user_id", user.id).order("scheduled_for", { ascending: false }).limit(500),
           supabase.from("user_plants")
-            .select("id,zone_id,plant_slug,custom_name,qty,plants_catalog(name_da,water_need,image_url)")
+            .select("id,zone_id,plant_slug,custom_name,qty,planted_at,notes,plants_catalog(name_da,water_need,image_url)")
             .eq("garden_id", g.id),
         ]);
         setZones((zs ?? []) as ZoneRow[]);
@@ -149,6 +152,7 @@ export default function WateringPlan() {
           (map[p.zone_id] ||= []).push({
             id: p.id, zone_id: p.zone_id, plant_slug: p.plant_slug,
             custom_name: p.custom_name, qty: p.qty,
+            planted_at: p.planted_at, notes: p.notes,
             name_da: p.plants_catalog?.name_da, water_need: p.plants_catalog?.water_need,
             image_url: p.plants_catalog?.image_url,
           });
@@ -305,7 +309,36 @@ export default function WateringPlan() {
     });
   }
 
-  // ----- AI Plan -----
+  function updatePlantLocal(id: string, patch: Partial<ZonePlant>) {
+    setPlantsByZone(prev => {
+      const next: Record<string, ZonePlant[]> = {};
+      for (const [zid, list] of Object.entries(prev)) {
+        next[zid] = list.map(p => p.id === id ? { ...p, ...patch } : p);
+      }
+      return next;
+    });
+  }
+  function removePlantLocal(id: string) {
+    setPlantsByZone(prev => {
+      const next: Record<string, ZonePlant[]> = {};
+      for (const [zid, list] of Object.entries(prev)) next[zid] = list.filter(p => p.id !== id);
+      return next;
+    });
+  }
+  function movePlantLocal(id: string, newZoneId: string) {
+    setPlantsByZone(prev => {
+      const next: Record<string, ZonePlant[]> = {};
+      let moving: ZonePlant | null = null;
+      for (const [zid, list] of Object.entries(prev)) {
+        next[zid] = list.filter(p => {
+          if (p.id === id) { moving = { ...p, zone_id: newZoneId }; return false; }
+          return true;
+        });
+      }
+      if (moving) next[newZoneId] = [...(next[newZoneId] ?? []), moving];
+      return next;
+    });
+  }
   async function generateAiPlan() {
     if (!garden || zones.length === 0) return;
     setAiOpen(true);
@@ -525,6 +558,7 @@ export default function WateringPlan() {
           <div style={{ display: "flex", gap: 6, marginBottom: 18, padding: 4, background: "var(--ink-50)", borderRadius: 100, width: "fit-content" }}>
             {([
               { k: "cards", label: "Bede", icon: LayoutGrid },
+              { k: "plants", label: "Planter", icon: Sprout },
               { k: "calendar", label: "Kalender", icon: CalendarDays },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
@@ -547,6 +581,16 @@ export default function WateringPlan() {
         {/* Calendar view */}
         {garden && zones.length > 0 && view === "calendar" && (
           <CalendarTimeline schedules={schedules} zones={zones} forecasts={forecasts} opts={decideOpts} onSnooze={snoozeOn} />
+        )}
+
+        {/* Plants view */}
+        {garden && zones.length > 0 && view === "plants" && (
+          <PlantsTab
+            zones={zones}
+            plantsByZone={plantsByZone}
+            onOpenPlant={(p, zoneName) => setOpenPlant({ plant: p, zoneName })}
+            onAddToZone={(z) => setAddPlantsZone(z as ZoneRow)}
+          />
         )}
 
         {/* Seasonal coach view */}
@@ -599,6 +643,7 @@ export default function WateringPlan() {
                         plants={plantsByZone[z.id] ?? []}
                         onAdd={() => setAddPlantsZone(z)}
                         onRemove={(p) => removePlant(z.id, p)}
+                        onOpen={(p) => setOpenPlant({ plant: p, zoneName: z.name })}
                       />
                     </div>
 
@@ -700,6 +745,16 @@ export default function WateringPlan() {
         zone={quickWaterZone}
         plantNames={(quickWaterZone ? plantsByZone[quickWaterZone.id] ?? [] : []).map(p => p.custom_name || p.name_da || p.plant_slug || "plante")}
         onConfirm={async (min) => { if (quickWaterZone) await waterNow(quickWaterZone, min); }}
+      />
+
+      <PlantDetailSheet
+        plant={openPlant?.plant ?? null}
+        zoneName={openPlant?.zoneName ?? ""}
+        zones={zones.map(z => ({ id: z.id, name: z.name }))}
+        onOpenChange={(v) => !v && setOpenPlant(null)}
+        onUpdated={(id, patch) => updatePlantLocal(id, patch as any)}
+        onRemoved={(id) => removePlantLocal(id)}
+        onMoved={(id, newZoneId) => movePlantLocal(id, newZoneId)}
       />
 
       <SiteFooter />

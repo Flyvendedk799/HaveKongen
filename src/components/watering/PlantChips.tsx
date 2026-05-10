@@ -10,6 +10,8 @@ export type ZonePlant = {
   name_da?: string | null;
   water_need?: string | null;
   image_url?: string | null;
+  planted_at?: string | null;
+  notes?: string | null;
 };
 
 const waterColor = (w?: string | null) =>
@@ -19,10 +21,12 @@ export default function PlantChips({
   plants,
   onAdd,
   onRemove,
+  onOpen,
 }: {
   plants: ZonePlant[];
   onAdd: () => void;
   onRemove: (p: ZonePlant) => void;
+  onOpen?: (p: ZonePlant) => void;
 }) {
   if (plants.length === 0) {
     return (
@@ -58,10 +62,20 @@ export default function PlantChips({
                 fontSize: 12, color: "var(--ink-900)",
               }}
             >
-              <span style={{ width: 7, height: 7, borderRadius: 99, background: waterColor(p.water_need) }} />
-              {name}{p.qty > 1 ? ` ×${p.qty}` : ""}
               <button
-                onClick={() => onRemove(p)}
+                onClick={() => onOpen?.(p)}
+                title="Vis detaljer"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: "none", background: "transparent", padding: 0, cursor: onOpen ? "pointer" : "default",
+                  color: "var(--ink-900)", fontSize: 12,
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: waterColor(p.water_need) }} />
+                {name}{p.qty > 1 ? ` ×${p.qty}` : ""}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onRemove(p); }}
                 aria-label={`Fjern ${name}`}
                 style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
