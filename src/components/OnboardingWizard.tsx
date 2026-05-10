@@ -41,9 +41,9 @@ export function OnboardingWizard() {
     },
     {
       title: "Vælg planter & vanding",
-      body: "Du er klar. Udforsk webshop, vandingsplan eller spørg AI'en.",
-      cta: "Færdig",
-      next: () => complete(),
+      body: "Du er klar. Se dit overblik på Min have — eller hop direkte i webshop, vanding eller AI.",
+      cta: "Til Min have",
+      next: () => complete("/min-have"),
     },
   ];
   const s = steps[step];
