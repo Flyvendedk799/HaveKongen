@@ -31,6 +31,7 @@ import QuickWaterDialog from "@/components/watering/QuickWaterDialog";
 import InsightsTab from "@/components/watering/InsightsTab";
 import PlantsTab from "@/components/watering/PlantsTab";
 import PlantDetailSheet from "@/components/watering/PlantDetailSheet";
+import IdentifyPlantDialog from "@/components/watering/IdentifyPlantDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -72,7 +73,8 @@ export default function WateringPlan() {
   const [plantsByZone, setPlantsByZone] = useState<Record<string, ZonePlant[]>>({});
   const [addPlantsZone, setAddPlantsZone] = useState<ZoneRow | null>(null);
   const [quickWaterZone, setQuickWaterZone] = useState<ZoneRow | null>(null);
-  const [openPlant, setOpenPlant] = useState<{ plant: ZonePlant; zoneName: string } | null>(null);
+  const [openPlant, setOpenPlant] = useState<{ plant: ZonePlant; zoneName: string; zoneId: string } | null>(null);
+  const [identifyOpen, setIdentifyOpen] = useState(false);
 
   // pause + snooze + alert state (persisted to localStorage)
   const [pauseUntil, setPauseUntilState] = useState<Date | null>(() => {
@@ -140,7 +142,7 @@ export default function WateringPlan() {
           supabase.from("watering_events").select("*")
             .eq("user_id", user.id).order("scheduled_for", { ascending: false }).limit(500),
           supabase.from("user_plants")
-            .select("id,zone_id,plant_slug,custom_name,qty,planted_at,notes,plants_catalog(name_da,water_need,image_url)")
+            .select("id,zone_id,plant_slug,custom_name,qty,planted_at,notes,image_url,plants_catalog(name_da,water_need,image_url)")
             .eq("garden_id", g.id),
         ]);
         setZones((zs ?? []) as ZoneRow[]);
@@ -153,8 +155,8 @@ export default function WateringPlan() {
             id: p.id, zone_id: p.zone_id, plant_slug: p.plant_slug,
             custom_name: p.custom_name, qty: p.qty,
             planted_at: p.planted_at, notes: p.notes,
+            image_url: p.image_url ?? p.plants_catalog?.image_url,
             name_da: p.plants_catalog?.name_da, water_need: p.plants_catalog?.water_need,
-            image_url: p.plants_catalog?.image_url,
           });
         });
         setPlantsByZone(map);
