@@ -36,6 +36,7 @@ import JournalTab, { logJournal } from "@/components/watering/JournalTab";
 import MorningBriefing from "@/components/watering/MorningBriefing";
 import CalendarTab from "@/components/watering/CalendarTab";
 import GardenChatBubble from "@/components/watering/GardenChatBubble";
+import NeighborsTab from "@/components/watering/NeighborsTab";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
