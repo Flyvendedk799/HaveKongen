@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout, NotebookPen, CalendarRange } from "lucide-react";
+import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout, NotebookPen, CalendarRange, Users } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -36,6 +36,7 @@ import JournalTab, { logJournal } from "@/components/watering/JournalTab";
 import MorningBriefing from "@/components/watering/MorningBriefing";
 import CalendarTab from "@/components/watering/CalendarTab";
 import GardenChatBubble from "@/components/watering/GardenChatBubble";
+import NeighborsTab from "@/components/watering/NeighborsTab";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -92,7 +93,7 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  type View = "cards" | "plants" | "journal" | "calendar" | "yearwheel" | "coach" | "insights";
+  type View = "cards" | "plants" | "journal" | "calendar" | "yearwheel" | "neighbors" | "coach" | "insights";
   const [view, setView] = useState<View>(() => (localStorage.getItem("watering.view") as View) || "cards");
   const [catalogBySlug, setCatalogBySlug] = useState<Record<string, any>>({});
   function setViewPersist(v: View) {
@@ -589,6 +590,7 @@ export default function WateringPlan() {
               { k: "journal", label: "Journal", icon: NotebookPen },
               { k: "calendar", label: "Vandinger", icon: CalendarDays },
               { k: "yearwheel", label: "Årshjul", icon: CalendarRange },
+              { k: "neighbors", label: "Naboer", icon: Users },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
             ] as const).map(({ k, label, icon: Icon }) => (
@@ -632,6 +634,9 @@ export default function WateringPlan() {
         {garden && view === "journal" && (
           <JournalTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} />
         )}
+
+        {/* Neighbors view */}
+        {view === "neighbors" && <NeighborsTab />}
 
         {/* Seasonal coach view */}
         {garden && zones.length > 0 && view === "coach" && user && (

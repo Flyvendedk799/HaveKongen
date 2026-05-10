@@ -425,6 +425,103 @@ export type Database = {
         }
         Relationships: []
       }
+      neighbor_comments: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          post_id: string
+          user_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          post_id: string
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          post_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "neighbor_comments_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "neighbor_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      neighbor_likes: {
+        Row: {
+          created_at: string
+          post_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          post_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          post_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "neighbor_likes_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "neighbor_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      neighbor_posts: {
+        Row: {
+          body: string | null
+          created_at: string
+          data: Json
+          id: string
+          image_url: string | null
+          kind: string
+          postal_code: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          image_url?: string | null
+          kind?: string
+          postal_code?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          image_url?: string | null
+          kind?: string
+          postal_code?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           body: string | null
@@ -833,6 +930,51 @@ export type Database = {
         }
         Relationships: []
       }
+      seed_swaps: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string | null
+          plant_slug: string | null
+          postal_code: string | null
+          qty: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+          wants: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          plant_slug?: string | null
+          postal_code?: string | null
+          qty?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+          wants?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          plant_slug?: string | null
+          postal_code?: string | null
+          qty?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+          wants?: string | null
+        }
+        Relationships: []
+      }
       task_log: {
         Row: {
           created_at: string
@@ -1178,6 +1320,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      same_postal: { Args: { _a: string; _b: string }; Returns: boolean }
+      user_postal: { Args: { _user_id: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "user"
