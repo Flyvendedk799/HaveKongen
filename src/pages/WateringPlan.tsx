@@ -89,8 +89,8 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  const [view, setView] = useState<"cards" | "plants" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
-  function setViewPersist(v: "cards" | "plants" | "calendar" | "coach" | "insights") {
+  const [view, setView] = useState<"cards" | "plants" | "journal" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
+  function setViewPersist(v: "cards" | "plants" | "journal" | "calendar" | "coach" | "insights") {
     setView(v); localStorage.setItem("watering.view", v);
   }
   function snoozeOn(scheduleId: string, dateISO: string) {
