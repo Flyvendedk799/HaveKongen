@@ -587,7 +587,8 @@ export default function WateringPlan() {
               { k: "cards", label: "Bede", icon: LayoutGrid },
               { k: "plants", label: "Planter", icon: Sprout },
               { k: "journal", label: "Journal", icon: NotebookPen },
-              { k: "calendar", label: "Kalender", icon: CalendarDays },
+              { k: "calendar", label: "Vandinger", icon: CalendarDays },
+              { k: "yearwheel", label: "Årshjul", icon: CalendarRange },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
             ] as const).map(({ k, label, icon: Icon }) => (
@@ -606,9 +607,14 @@ export default function WateringPlan() {
           </div>
         )}
 
-        {/* Calendar view */}
+        {/* Calendar view (watering schedules) */}
         {garden && zones.length > 0 && view === "calendar" && (
           <CalendarTimeline schedules={schedules} zones={zones} forecasts={forecasts} opts={decideOpts} onSnooze={snoozeOn} />
+        )}
+
+        {/* Year-wheel view (sow/harvest/prune calendar per plant) */}
+        {garden && view === "yearwheel" && (
+          <CalendarTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} catalogBySlug={catalogBySlug} />
         )}
 
         {/* Plants view */}
