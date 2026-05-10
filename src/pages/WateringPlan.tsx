@@ -753,11 +753,19 @@ export default function WateringPlan() {
       <PlantDetailSheet
         plant={openPlant?.plant ?? null}
         zoneName={openPlant?.zoneName ?? ""}
+        zone={openPlant ? zones.find(z => z.id === openPlant.zoneId) ?? null : null}
         zones={zones.map(z => ({ id: z.id, name: z.name }))}
         onOpenChange={(v) => !v && setOpenPlant(null)}
         onUpdated={(id, patch) => updatePlantLocal(id, patch as any)}
         onRemoved={(id) => removePlantLocal(id)}
         onMoved={(id, newZoneId) => movePlantLocal(id, newZoneId)}
+      />
+
+      <IdentifyPlantDialog
+        open={identifyOpen}
+        onOpenChange={setIdentifyOpen}
+        zones={zones.map(z => ({ id: z.id, name: z.name, sun_exposure: z.sun_exposure }))}
+        onAdded={() => { if (activeGardenId) setActive(activeGardenId); }}
       />
 
       <SiteFooter />
