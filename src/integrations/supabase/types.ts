@@ -791,6 +791,7 @@ export type Database = {
           custom_name: string | null
           garden_id: string
           id: string
+          image_url: string | null
           notes: string | null
           plant_slug: string | null
           planted_at: string | null
@@ -803,6 +804,7 @@ export type Database = {
           custom_name?: string | null
           garden_id: string
           id?: string
+          image_url?: string | null
           notes?: string | null
           plant_slug?: string | null
           planted_at?: string | null
@@ -815,6 +817,7 @@ export type Database = {
           custom_name?: string | null
           garden_id?: string
           id?: string
+          image_url?: string | null
           notes?: string | null
           plant_slug?: string | null
           planted_at?: string | null
