@@ -558,6 +558,7 @@ export default function WateringPlan() {
           <div style={{ display: "flex", gap: 6, marginBottom: 18, padding: 4, background: "var(--ink-50)", borderRadius: 100, width: "fit-content" }}>
             {([
               { k: "cards", label: "Bede", icon: LayoutGrid },
+              { k: "plants", label: "Planter", icon: Sprout },
               { k: "calendar", label: "Kalender", icon: CalendarDays },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
