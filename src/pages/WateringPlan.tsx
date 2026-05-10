@@ -94,7 +94,7 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  type View = "cards" | "plants" | "journal" | "calendar" | "yearwheel" | "neighbors" | "coach" | "insights";
+  type View = "cards" | "plants" | "journal" | "calendar" | "yearwheel" | "neighbors" | "iot" | "coach" | "insights";
   const [view, setView] = useState<View>(() => (localStorage.getItem("watering.view") as View) || "cards");
   const [catalogBySlug, setCatalogBySlug] = useState<Record<string, any>>({});
   function setViewPersist(v: View) {
