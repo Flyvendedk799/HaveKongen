@@ -211,7 +211,8 @@ export default function PlantsTab({
             </AnimatePresence>
           </div>
         </div>
-      ))}
+        </div>
+      );})}
     </div>
   );
 }
