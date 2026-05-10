@@ -686,6 +686,22 @@ export default function WateringPlan() {
 
       <AiPlanPreview open={aiOpen} onOpenChange={setAiOpen} plan={aiPlan} loading={aiLoading} zoneNames={zoneNames} onApply={applyAiPlan} />
 
+      <AddPlantsDialog
+        open={!!addPlantsZone}
+        onOpenChange={(v) => !v && setAddPlantsZone(null)}
+        zoneName={addPlantsZone?.name ?? ""}
+        zoneSun={addPlantsZone?.sun_exposure}
+        onAdd={async (items) => { if (addPlantsZone) await addPlants(addPlantsZone, items); }}
+      />
+
+      <QuickWaterDialog
+        open={!!quickWaterZone}
+        onOpenChange={(v) => !v && setQuickWaterZone(null)}
+        zone={quickWaterZone}
+        plantNames={(quickWaterZone ? plantsByZone[quickWaterZone.id] ?? [] : []).map(p => p.custom_name || p.name_da || p.plant_slug || "plante")}
+        onConfirm={async (min) => { if (quickWaterZone) await waterNow(quickWaterZone, min); }}
+      />
+
       <SiteFooter />
     </>
   );
