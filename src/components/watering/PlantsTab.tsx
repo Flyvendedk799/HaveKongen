@@ -35,6 +35,29 @@ export default function PlantsTab({
     return { totalQty, high, distinct, beds: zones.length };
   }, [allPlants, zones]);
 
+  // Companion data
+  const allSlugs = useMemo(() => {
+    const s = new Set<string>();
+    for (const x of allPlants) if (x.plant.plant_slug) s.add(x.plant.plant_slug);
+    return Array.from(s);
+  }, [allPlants]);
+  const [companion, setCompanion] = useState<CompanionMap | null>(null);
+  useEffect(() => {
+    if (allSlugs.length === 0) { setCompanion(null); return; }
+    getCompanionMaps(allSlugs).then(setCompanion).catch(() => setCompanion(null));
+  }, [allSlugs.join("|")]);
+
+  const conflictsByZone = useMemo(() => {
+    const out: Record<string, ReturnType<typeof detectConflicts>> = {};
+    if (!companion) return out;
+    for (const z of zones) {
+      const slugs = (plantsByZone[z.id] ?? []).map(p => p.plant_slug).filter(Boolean) as string[];
+      const c = detectConflicts(slugs, companion);
+      if (c.length) out[z.id] = c;
+    }
+    return out;
+  }, [companion, zones, plantsByZone]);
+
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return allPlants.filter(({ plant }) => {
