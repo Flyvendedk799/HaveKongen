@@ -68,6 +68,7 @@ export function SiteNav({ onDark = true }: { onDark?: boolean }) {
         Havelandet
       </Link>
       <div className="nav-links">
+        <Link to="/min-have">Min have</Link>
         <Link to="/webshop">Webshop</Link>
         <Link to="/havemaaler">Havemåler</Link>
         <Link to="/vanding">Vandingsplan</Link>
@@ -100,6 +101,7 @@ export function AppNav({ active }: { active?: string }) {
         Havelandet
       </Link>
       <div className="nav-links">
+        {link("/min-have", "Min have", "hub")}
         {link("/webshop", "Webshop", "shop")}
         {link("/havemaaler", "Havemåler", "sizer")}
         {link("/vanding", "Vandingsplan", "water")}

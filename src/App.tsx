@@ -26,6 +26,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword.tsx"));
 const GardenSizer = lazy(() => import("./pages/GardenSizer.tsx"));
 const WateringPlan = lazy(() => import("./pages/WateringPlan.tsx"));
 const PlantCareAI = lazy(() => import("./pages/PlantCareAI.tsx"));
+const MinHave = lazy(() => import("./pages/MinHave.tsx"));
 const Account = lazy(() => import("./pages/Account.tsx"));
 const Checkout = lazy(() => import("./pages/Checkout.tsx"));
 const OrderConfirmation = lazy(() => import("./pages/OrderConfirmation.tsx"));
@@ -77,6 +78,7 @@ const App = () => (
                     <Route path="/login" element={<AuthPage initialMode="login" />} />
                     <Route path="/signup" element={<AuthPage initialMode="signup" />} />
                     <Route path="/reset-password" element={<ResetPassword />} />
+                    <Route path="/min-have" element={<MinHave />} />
                     <Route path="/havemaaler" element={<GardenSizer />} />
                     <Route path="/vanding" element={<WateringPlan />} />
                     <Route path="/ai" element={<PlantCareAI />} />
