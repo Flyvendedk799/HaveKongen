@@ -169,6 +169,45 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_briefings: {
+        Row: {
+          alerts: Json
+          created_at: string
+          for_date: string
+          garden_id: string | null
+          id: string
+          summary: string | null
+          tasks: Json
+          tip: string | null
+          user_id: string
+          weather: string | null
+        }
+        Insert: {
+          alerts?: Json
+          created_at?: string
+          for_date: string
+          garden_id?: string | null
+          id?: string
+          summary?: string | null
+          tasks?: Json
+          tip?: string | null
+          user_id: string
+          weather?: string | null
+        }
+        Update: {
+          alerts?: Json
+          created_at?: string
+          for_date?: string
+          garden_id?: string | null
+          id?: string
+          summary?: string | null
+          tasks?: Json
+          tip?: string | null
+          user_id?: string
+          weather?: string | null
+        }
+        Relationships: []
+      }
       devices: {
         Row: {
           battery: number | null
@@ -570,11 +609,15 @@ export type Database = {
           latin: string | null
           month_tasks: Json | null
           name_da: string
+          prikle_weeks_after_sow: number | null
+          prune_months: number[] | null
           root_depth_cm: number | null
           slug: string
           sow_months: number[] | null
           sun: string | null
+          transplant_months: number[] | null
           water_need: string | null
+          winterize_months: number[] | null
         }
         Insert: {
           antagonist_plants?: string[] | null
@@ -590,11 +633,15 @@ export type Database = {
           latin?: string | null
           month_tasks?: Json | null
           name_da: string
+          prikle_weeks_after_sow?: number | null
+          prune_months?: number[] | null
           root_depth_cm?: number | null
           slug: string
           sow_months?: number[] | null
           sun?: string | null
+          transplant_months?: number[] | null
           water_need?: string | null
+          winterize_months?: number[] | null
         }
         Update: {
           antagonist_plants?: string[] | null
@@ -610,11 +657,15 @@ export type Database = {
           latin?: string | null
           month_tasks?: Json | null
           name_da?: string
+          prikle_weeks_after_sow?: number | null
+          prune_months?: number[] | null
           root_depth_cm?: number | null
           slug?: string
           sow_months?: number[] | null
           sun?: string | null
+          transplant_months?: number[] | null
           water_need?: string | null
+          winterize_months?: number[] | null
         }
         Relationships: []
       }

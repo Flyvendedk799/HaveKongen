@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout, NotebookPen } from "lucide-react";
+import { Sparkles, Plus, Pencil, Trash2, Droplets, Calendar, LayoutGrid, CalendarDays, Leaf, BarChart3, Sprout, NotebookPen, CalendarRange } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -33,6 +33,9 @@ import PlantsTab from "@/components/watering/PlantsTab";
 import PlantDetailSheet from "@/components/watering/PlantDetailSheet";
 import IdentifyPlantDialog from "@/components/watering/IdentifyPlantDialog";
 import JournalTab, { logJournal } from "@/components/watering/JournalTab";
+import MorningBriefing from "@/components/watering/MorningBriefing";
+import CalendarTab from "@/components/watering/CalendarTab";
+import GardenChatBubble from "@/components/watering/GardenChatBubble";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -89,8 +92,10 @@ export default function WateringPlan() {
     } catch { return new Set(); }
   });
   const [rainDismissedAt, setRainDismissedAt] = useState<string | null>(() => localStorage.getItem("watering.rainDismissed"));
-  const [view, setView] = useState<"cards" | "plants" | "journal" | "calendar" | "coach" | "insights">(() => (localStorage.getItem("watering.view") as any) || "cards");
-  function setViewPersist(v: "cards" | "plants" | "journal" | "calendar" | "coach" | "insights") {
+  type View = "cards" | "plants" | "journal" | "calendar" | "yearwheel" | "coach" | "insights";
+  const [view, setView] = useState<View>(() => (localStorage.getItem("watering.view") as View) || "cards");
+  const [catalogBySlug, setCatalogBySlug] = useState<Record<string, any>>({});
+  function setViewPersist(v: View) {
     setView(v); localStorage.setItem("watering.view", v);
   }
   function snoozeOn(scheduleId: string, dateISO: string) {
@@ -173,6 +178,22 @@ export default function WateringPlan() {
     if (!garden?.latitude || !garden?.longitude) return;
     fetchForecast(garden.latitude, garden.longitude).then(setForecasts).catch(() => setForecasts([]));
   }, [garden?.latitude, garden?.longitude]);
+
+  // catalog (for season calendar)
+  useEffect(() => {
+    const slugs = Array.from(new Set(
+      Object.values(plantsByZone).flat().map(p => p.plant_slug).filter(Boolean) as string[]
+    ));
+    if (slugs.length === 0) { setCatalogBySlug({}); return; }
+    supabase.from("plants_catalog")
+      .select("slug,name_da,sow_months,harvest_months,transplant_months,prune_months,winterize_months")
+      .in("slug", slugs)
+      .then(({ data }) => {
+        const map: Record<string, any> = {};
+        (data ?? []).forEach((c: any) => { map[c.slug] = c; });
+        setCatalogBySlug(map);
+      });
+  }, [plantsByZone]);
 
   const decideOpts = useMemo(() => ({ pauseUntil, snoozedKeys }), [pauseUntil, snoozedKeys]);
   const summary = useMemo(() => weekSummary(schedules, zones, forecasts, decideOpts), [schedules, zones, forecasts, decideOpts]);
@@ -449,6 +470,9 @@ export default function WateringPlan() {
           </div>
         )}
 
+        {/* Daily AI briefing */}
+        {garden && user && <MorningBriefing userId={user.id} />}
+
         {/* Today hero (cinema) */}
         {garden && (() => {
           const todayKey = new Date().toISOString().slice(0, 10);
@@ -563,7 +587,8 @@ export default function WateringPlan() {
               { k: "cards", label: "Bede", icon: LayoutGrid },
               { k: "plants", label: "Planter", icon: Sprout },
               { k: "journal", label: "Journal", icon: NotebookPen },
-              { k: "calendar", label: "Kalender", icon: CalendarDays },
+              { k: "calendar", label: "Vandinger", icon: CalendarDays },
+              { k: "yearwheel", label: "Årshjul", icon: CalendarRange },
               { k: "coach", label: "Sæson", icon: Leaf },
               { k: "insights", label: "Indsigt", icon: BarChart3 },
             ] as const).map(({ k, label, icon: Icon }) => (
@@ -582,9 +607,14 @@ export default function WateringPlan() {
           </div>
         )}
 
-        {/* Calendar view */}
+        {/* Calendar view (watering schedules) */}
         {garden && zones.length > 0 && view === "calendar" && (
           <CalendarTimeline schedules={schedules} zones={zones} forecasts={forecasts} opts={decideOpts} onSnooze={snoozeOn} />
+        )}
+
+        {/* Year-wheel view (sow/harvest/prune calendar per plant) */}
+        {garden && view === "yearwheel" && (
+          <CalendarTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} catalogBySlug={catalogBySlug} />
         )}
 
         {/* Plants view */}
@@ -780,6 +810,8 @@ export default function WateringPlan() {
           }));
         }}
       />
+
+      {user && garden && <GardenChatBubble />}
 
       <SiteFooter />
     </>

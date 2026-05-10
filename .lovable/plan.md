@@ -180,11 +180,11 @@ neighbor-moderate         AI-tjek af nye posts (spam/abuse)
 2. Companion-badges i Plants/Detail/AddPlants
 3. JournalTab + foto-upload + auto-entries
 
-**Fase 2 — Sæson-kalender + proaktiv AI**
-4. Catalog-udvidelser (sow/transplant/prune/winterize)
-5. CalendarTab + `seasonal-tasks-generate` cron
-6. `daily-briefing` cron + morgen-kort + `daily_briefings` tabel
-7. Global `garden-chat` med tools + floating bubble
+**Fase 2 — Sæson-kalender + proaktiv AI** ✅ FÆRDIG
+4. Catalog-udvidelser (transplant/prune/winterize) ✅
+5. CalendarTab (Årshjul) ✅
+6. `daily-briefing` edge function + MorningBriefing-kort + `daily_briefings` tabel ✅
+7. Global `garden-chat` med tools + floating bubble ✅
 
 **Fase 3 — Naboer**
 8. Migration: 4 community-tabeller + `same_postal` helper
