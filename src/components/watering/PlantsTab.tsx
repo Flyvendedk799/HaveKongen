@@ -58,13 +58,18 @@ export default function PlantsTab({
         <Leaf size={36} className="mx-auto mb-3" style={{ color: "var(--forest-800)" }} />
         <h3 style={{ fontSize: 18, marginBottom: 6 }}>Ingen planter endnu</h3>
         <p style={{ color: "var(--ink-500)", fontSize: 14, marginBottom: 16 }}>
-          Tilføj planter til dine bede for at få bedre vandingsplan og pleje-anbefalinger.
+          Tag et billede og lad AI identificere — eller tilføj manuelt fra kataloget.
         </p>
-        {zones.length > 0 && (
-          <Button onClick={() => onAddToZone(zones[0])}>
-            <Plus size={14} className="mr-1.5" />Tilføj planter til {zones[0].name}
+        <div className="flex gap-2 justify-center flex-wrap">
+          <Button onClick={onIdentify}>
+            <Sparkles size={14} className="mr-1.5" />Identificér med AI
           </Button>
-        )}
+          {zones.length > 0 && (
+            <Button variant="outline" onClick={() => onAddToZone(zones[0])}>
+              <Plus size={14} className="mr-1.5" />Tilføj manuelt
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
