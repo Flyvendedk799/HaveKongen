@@ -527,6 +527,7 @@ export default function WateringPlan() {
               { k: "cards", label: "Bede", icon: LayoutGrid },
               { k: "calendar", label: "Kalender", icon: CalendarDays },
               { k: "coach", label: "Sæson", icon: Leaf },
+              { k: "insights", label: "Indsigt", icon: BarChart3 },
             ] as const).map(({ k, label, icon: Icon }) => (
               <button key={k} onClick={() => setViewPersist(k)}
                 style={{
@@ -551,6 +552,10 @@ export default function WateringPlan() {
         {/* Seasonal coach view */}
         {garden && zones.length > 0 && view === "coach" && user && (
           <SeasonalCoach userId={user.id} gardenId={garden.id} />
+        )}
+
+        {garden && zones.length > 0 && view === "insights" && (
+          <InsightsTab events={events} zones={zones} />
         )}
 
         {/* Zone cards (default) */}
@@ -578,7 +583,7 @@ export default function WateringPlan() {
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <Button size="sm" variant="ghost" onClick={() => waterNow(z)}><Droplets size={14} className="mr-1" />Vand nu</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setQuickWaterZone(z)}><Droplets size={14} className="mr-1" />Vand nu</Button>
                         <Button size="sm" variant="ghost" onClick={() => addSchedule(z.id)}><Plus size={14} className="mr-1" />Timer</Button>
                         <Button size="sm" variant="ghost" onClick={() => { setEditing({ id: z.id, name: z.name, type: z.type, area_m2: Number(z.area_m2 ?? 10), sun_exposure: z.sun_exposure ?? "sun", soil: z.soil ?? "loam" }); setBedOpen(true); }}>
                           <Pencil size={14} />
