@@ -130,17 +130,33 @@ export default function WateringPlan() {
       if (g && !activeGardenId) setActive(g.id);
 
       if (g) {
-        const { data: zs } = await supabase.from("garden_zones")
-          .select("id,garden_id,name,type,area_m2,sun_exposure,soil").eq("garden_id", g.id);
+        const [{ data: zs }, { data: ss }, { data: es }, { data: pl }] = await Promise.all([
+          supabase.from("garden_zones")
+            .select("id,garden_id,name,type,area_m2,sun_exposure,soil").eq("garden_id", g.id),
+          supabase.from("watering_schedules").select("*").eq("user_id", user.id),
+          supabase.from("watering_events").select("*")
+            .eq("user_id", user.id).order("scheduled_for", { ascending: false }).limit(500),
+          supabase.from("user_plants")
+            .select("id,zone_id,plant_slug,custom_name,qty,plants_catalog(name_da,water_need,image_url)")
+            .eq("garden_id", g.id),
+        ]);
         setZones((zs ?? []) as ZoneRow[]);
-      } else setZones([]);
-
-      const { data: ss } = await supabase.from("watering_schedules").select("*").eq("user_id", user.id);
-      setSchedules(ss ?? []);
-
-      const { data: es } = await supabase.from("watering_events").select("*")
-        .eq("user_id", user.id).order("scheduled_for", { ascending: false }).limit(20);
-      setEvents((es ?? []) as EventRow[]);
+        setSchedules(ss ?? []);
+        setEvents((es ?? []) as EventRow[]);
+        const map: Record<string, ZonePlant[]> = {};
+        (pl ?? []).forEach((p: any) => {
+          if (!p.zone_id) return;
+          (map[p.zone_id] ||= []).push({
+            id: p.id, zone_id: p.zone_id, plant_slug: p.plant_slug,
+            custom_name: p.custom_name, qty: p.qty,
+            name_da: p.plants_catalog?.name_da, water_need: p.plants_catalog?.water_need,
+            image_url: p.plants_catalog?.image_url,
+          });
+        });
+        setPlantsByZone(map);
+      } else {
+        setZones([]); setSchedules([]); setEvents([]); setPlantsByZone({});
+      }
       setLoading(false);
     })();
   }, [user, activeGardenId]);
