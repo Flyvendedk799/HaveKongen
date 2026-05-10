@@ -90,6 +90,9 @@ export default function PlantsTab({
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Søg blandt dine planter…" className="pl-9 h-9" />
         </div>
+        <Button size="sm" onClick={onIdentify} className="h-9">
+          <Sparkles size={14} className="mr-1.5" />Snap & ID
+        </Button>
         <div className="flex gap-1 p-0.5 rounded-full" style={{ background: "var(--ink-50)" }}>
           {([
             { k: "all", l: "Alle" },
@@ -141,10 +144,18 @@ export default function PlantsTab({
                   style={{ borderColor: "rgba(20,39,29,0.08)", background: "white" }}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full mt-1.5"
-                      style={{ background: p.water_need === "high" ? "#2563eb" : p.water_need === "low" ? "#a16207" : "var(--forest-800)" }} />
+                    {p.image_url ? (
+                      <img src={p.image_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ background: "rgba(20,39,29,0.05)" }}>
+                        <Leaf size={18} className="text-muted-foreground" />
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full"
+                          style={{ background: p.water_need === "high" ? "#2563eb" : p.water_need === "low" ? "#a16207" : "var(--forest-800)" }} />
                         <span className="text-sm font-medium truncate">
                           {p.custom_name || p.name_da || p.plant_slug || "Plante"}
                         </span>
