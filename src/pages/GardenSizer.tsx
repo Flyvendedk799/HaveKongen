@@ -701,7 +701,7 @@ export default function GardenSizer() {
 
   function canAcceptWandResult(result: LawnSegmentationResult | null) {
     if (!result?.polygon?.length) return false;
-    if (result.confidence < 0.45) return false;
+    if (result.confidence < 0.4) return false;
     const rejectWarnings = new Set(["self_intersection", "area_too_small", "area_too_large", "click_outside_polygon", "parcel_leak", "hardscape_heavy_mask"]);
     return !result.diagnostics.warnings.some((warning) => rejectWarnings.has(warning));
   }
@@ -734,11 +734,12 @@ export default function GardenSizer() {
   }
 
   async function recomputeWandSegmentation(crop: LawnCropPayload, seeds: SegmentationSeed[], opts: { highPrecision?: boolean; cached?: boolean } = {}) {
+    const highPrecision = opts.highPrecision ?? true;
     setWandLoading(true);
-    setWandStage(opts.highPrecision ? "Tegner kant" : "Finder græs");
+    setWandStage(highPrecision ? "Tegner kant" : "Finder græs");
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const result = await segmentLawnFromCrop(crop, seeds, {
-      highPrecision: opts.highPrecision,
+      highPrecision,
       createMaskPreview: true,
     });
     setWandStage("Tegner kant");

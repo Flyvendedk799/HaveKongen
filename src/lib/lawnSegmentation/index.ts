@@ -790,6 +790,11 @@ export function segmentLawnImageData(
     - (warnings.includes("click_outside_polygon") ? 0.3 : 0)
     - (warnings.includes("self_intersection") ? 0.4 : 0);
   if (metadata.imagerySource === "mapbox") confidence -= 0.05;
+  const blockingWarnings = new Set(["self_intersection", "area_too_small", "area_too_large", "click_outside_polygon", "parcel_leak", "hardscape_heavy_mask"]);
+  const hasBlockingWarning = warnings.some((warning) => blockingWarnings.has(warning));
+  if (options.highPrecision && !hasBlockingWarning && outer.length >= 4) {
+    confidence = Math.max(confidence, 0.4);
+  }
   confidence = clamp(confidence, 0, 0.98);
 
   const needsReview = confidence < 0.74 || warnings.length > 0;
