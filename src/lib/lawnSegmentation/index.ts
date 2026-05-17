@@ -24,12 +24,13 @@ export type {
   SegmentationSeed,
 } from "./types";
 
-export const LAWN_SEGMENTATION_VERSION = "lawn-cv-v1";
+export const LAWN_SEGMENTATION_VERSION = "lawn-cv-v2";
 
 type FeatureMaps = {
   grass: Float32Array;
   hardscape: Float32Array;
   edge: Float32Array;
+  texture: Float32Array;
   luminance: Float32Array;
   seedSimilarity: Float32Array;
   negative: Uint8Array;
@@ -262,6 +263,7 @@ function buildFeatureMaps(
   const grass = new Float32Array(n);
   const hardscape = new Float32Array(n);
   const edge = new Float32Array(n);
+  const texture = new Float32Array(n);
   const luminance = new Float32Array(n);
   const seedSimilarity = new Float32Array(n);
   const parcel = buildParcelMask(width, height, metadata.parcelPx);
@@ -331,7 +333,43 @@ function buildFeatureMaps(
     }
   }
 
-  return { grass, hardscape, edge, luminance, seedSimilarity, negative, parcel };
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const p = y * width + x;
+      let meanLum = 0;
+      let meanExg = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const np = (y + dy) * width + x + dx;
+          meanLum += luminance[np];
+          meanExg += exg[np];
+        }
+      }
+      meanLum /= 9;
+      meanExg /= 9;
+      let variance = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const np = (y + dy) * width + x + dx;
+          variance += (luminance[np] - meanLum) ** 2 + ((exg[np] - meanExg) * 0.85) ** 2;
+        }
+      }
+      texture[p] = clamp(Math.sqrt(variance / 9) * 3.2 + edge[p] * 0.35, 0, 1);
+    }
+  }
+
+  for (let p = 0; p < n; p++) {
+    const roughVegetation = texture[p] > 0.14;
+    const deepShadowDifferent = luminance[p] < 0.26 && seedSimilarity[p] < 0.48;
+    const texturePenalty = roughVegetation
+      ? smoothstep(0.12, 0.34, texture[p]) * (seedSimilarity[p] > 0.74 ? 0.2 : 0.36)
+      : texture[p] * 0.08;
+    const shadowPenalty = deepShadowDifferent ? smoothstep(0.28, 0.12, luminance[p]) * 0.2 : 0;
+    grass[p] = clamp(grass[p] - texturePenalty - shadowPenalty, 0, 1);
+    if (texture[p] > 0.22 && seedSimilarity[p] < 0.82) hardscape[p] = Math.max(hardscape[p], 0.52);
+  }
+
+  return { grass, hardscape, edge, texture, luminance, seedSimilarity, negative, parcel };
 }
 
 function keepComponentContainingSeeds(mask: Uint8Array, width: number, height: number, seeds: PixelSeed[]): Uint8Array {
@@ -371,10 +409,13 @@ function growMask(maps: FeatureMaps, metadata: LawnCropMetadata, seeds: PixelSee
   const start = metadata.clickPx;
   const startIdx = Math.round(clamp(start[1], 0, height - 1)) * width + Math.round(clamp(start[0], 0, width - 1));
   const startScore = maps.grass[startIdx] || 0;
-  const base = options.highPrecision ? 0.46 : 0.4;
-  const threshold = clamp(Math.min(base, startScore * 0.78), 0.27, options.highPrecision ? 0.52 : 0.48);
-  const softThreshold = Math.max(0.2, threshold - (options.highPrecision ? 0.05 : 0.08));
-  const strongEdge = options.highPrecision ? 0.2 : 0.24;
+  const strongClick = startScore >= 0.55;
+  const threshold = strongClick
+    ? (options.highPrecision ? 0.52 : 0.48)
+    : clamp(startScore * 0.72, options.highPrecision ? 0.36 : 0.32, options.highPrecision ? 0.52 : 0.48);
+  const softThreshold = Math.max(options.highPrecision ? 0.31 : 0.28, threshold - (options.highPrecision ? 0.04 : 0.06));
+  const strongEdge = options.highPrecision ? 0.08 : 0.1;
+  const seedFloor = options.highPrecision ? 0.24 : 0.17;
   const mask = new Uint8Array(width * height);
   const visited = new Uint8Array(width * height);
   const queue: number[] = [];
@@ -406,9 +447,11 @@ function growMask(maps: FeatureMaps, metadata: LawnCropMetadata, seeds: PixelSee
       visited[np] = 1;
       if (maps.negative[np]) continue;
       if (maps.parcel && !maps.parcel[np]) continue;
-      if (maps.hardscape[np] > (options.highPrecision ? 0.68 : 0.76)) continue;
-      if (maps.edge[np] > strongEdge && maps.grass[np] < threshold + 0.08 && maps.seedSimilarity[np] < 0.55) continue;
-      if (maps.grass[np] >= threshold || (maps.grass[np] >= softThreshold && maps.seedSimilarity[np] >= 0.52)) {
+      if (maps.hardscape[np] > (options.highPrecision ? 0.58 : 0.64)) continue;
+      if (maps.texture[np] > (options.highPrecision ? 0.18 : 0.22) && maps.seedSimilarity[np] < 0.78) continue;
+      if (maps.edge[np] > strongEdge && maps.seedSimilarity[np] < 0.82 && maps.grass[np] < threshold + 0.28) continue;
+      if (maps.seedSimilarity[np] < seedFloor && maps.grass[np] < threshold + 0.16) continue;
+      if (maps.grass[np] >= threshold || (maps.grass[np] >= softThreshold && maps.seedSimilarity[np] >= 0.58)) {
         mask[np] = 1;
         queue.push(np);
       }
@@ -454,12 +497,32 @@ function erode(mask: Uint8Array, width: number, height: number): Uint8Array {
 
 function smoothMask(mask: Uint8Array, width: number, height: number, seeds: PixelSeed[], highPrecision = false) {
   let out = mask;
+  out = erode(out, width, height);
   out = dilate(out, width, height);
   if (!highPrecision) out = dilate(out, width, height);
   out = erode(out, width, height);
-  out = erode(out, width, height);
   out = keepComponentContainingSeeds(out, width, height, seeds);
   return out;
+}
+
+function constrainMask(
+  mask: Uint8Array,
+  maps: FeatureMaps,
+  metadata: LawnCropMetadata,
+  threshold: number,
+  seeds: PixelSeed[],
+  options: SegmentationOptions,
+): Uint8Array {
+  const out = new Uint8Array(mask);
+  for (let i = 0; i < out.length; i++) {
+    if (!out[i]) continue;
+    if (maps.negative[i]) out[i] = 0;
+    else if (maps.parcel && !maps.parcel[i]) out[i] = 0;
+    else if (maps.hardscape[i] > (options.highPrecision ? 0.56 : 0.62)) out[i] = 0;
+    else if (maps.texture[i] > (options.highPrecision ? 0.2 : 0.25) && maps.seedSimilarity[i] < 0.76) out[i] = 0;
+    else if (maps.grass[i] < threshold - 0.05 && maps.seedSimilarity[i] < 0.68) out[i] = 0;
+  }
+  return keepComponentContainingSeeds(out, metadata.width, metadata.height, seeds);
 }
 
 function buildContours(mask: Uint8Array, width: number, height: number): PixelRing[] {
@@ -656,7 +719,8 @@ export function segmentLawnImageData(
   const pixelSeeds = normalizeSeeds(seeds, metadata);
   const maps = buildFeatureMaps(imageData, metadata, pixelSeeds, options);
   const grown = growMask(maps, metadata, pixelSeeds, options);
-  const mask = smoothMask(grown.mask, metadata.width, metadata.height, pixelSeeds, !!options.highPrecision);
+  const smoothedMask = smoothMask(grown.mask, metadata.width, metadata.height, pixelSeeds, !!options.highPrecision);
+  const mask = constrainMask(smoothedMask, maps, metadata, grown.threshold, pixelSeeds, options);
   let maskAreaPx = 0;
   let grassSum = 0;
   let hardSum = 0;

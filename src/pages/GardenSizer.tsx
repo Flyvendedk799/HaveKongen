@@ -699,6 +699,13 @@ export default function GardenSizer() {
     else toast.error("Kunne ikke analysere billedet — prøv igen eller tegn manuelt");
   }
 
+  function canAcceptWandResult(result: LawnSegmentationResult | null) {
+    if (!result?.polygon?.length) return false;
+    if (result.confidence < 0.45) return false;
+    const rejectWarnings = new Set(["self_intersection", "area_too_small", "area_too_large", "click_outside_polygon", "parcel_leak", "hardscape_heavy_mask"]);
+    return !result.diagnostics.warnings.some((warning) => rejectWarnings.has(warning));
+  }
+
   async function setWandSegmentationResult(crop: LawnCropPayload, seeds: SegmentationSeed[], result: LawnSegmentationResult, cached = false) {
     if (!result.polygon.length) {
       setWandPreview(null);
@@ -820,9 +827,8 @@ export default function GardenSizer() {
     const s = stateRef.current;
     const result = s.wandPreview;
     if (!result?.polygon?.length) return;
-    const rejectWarnings = new Set(["self_intersection", "area_too_small", "area_too_large", "click_outside_polygon", "parcel_leak", "hardscape_heavy_mask"]);
-    if (result.diagnostics.warnings.some((warning) => rejectWarnings.has(warning))) {
-      toast.error("Forslaget er for usikkert til at gemme — klik på græs der mangler, fjern fejlområder, eller brug manuel redigering");
+    if (!canAcceptWandResult(result)) {
+      toast.error("Forslaget er for usikkert til at gemme — klik på græs der mangler, fjern fejlområder, eller tegn manuelt");
       return;
     }
     const ring = result.polygon;
@@ -847,8 +853,13 @@ export default function GardenSizer() {
   }
 
   function manualEditFromWand() {
-    if (stateRef.current.wandPreview?.polygon?.length) acceptWandPreview();
-    else setMode("edit");
+    const result = stateRef.current.wandPreview;
+    if (canAcceptWandResult(result)) acceptWandPreview();
+    else {
+      clearWandPreview();
+      setMode(mainClosed ? "edit" : "draw");
+      toast("AI-forslaget var for usikkert — tegn plænen manuelt");
+    }
   }
 
   // ----- Keyboard -----
@@ -1110,7 +1121,7 @@ export default function GardenSizer() {
                           <span style={{ fontSize: 11, color: "var(--gold)", fontFamily: "JetBrains Mono, monospace", marginRight: 4 }}>
                             {Math.round(wandPreview.confidence * 100)}% {wandPreview.needsReview ? "TJEK" : "KLAR"}
                           </span>
-                          <button className="tool-btn is-active" onClick={acceptWandPreview} disabled={wandLoading}>Accept</button>
+                          <button className="tool-btn is-active" onClick={acceptWandPreview} disabled={wandLoading || !canAcceptWandResult(wandPreview)}>Accept</button>
                           <button className={`tool-btn ${wandReviewMode === "add" ? "is-active" : ""}`} onClick={() => setWandReviewMode(v => v === "add" ? "none" : "add")} disabled={wandLoading}>Add grass</button>
                           <button className={`tool-btn ${wandReviewMode === "remove" ? "is-active" : ""}`} onClick={() => setWandReviewMode(v => v === "remove" ? "none" : "remove")} disabled={wandLoading}>Remove area</button>
                           <button className="tool-btn" onClick={tryHighPrecisionWand} disabled={wandLoading}>Try high precision</button>

@@ -108,6 +108,17 @@ describe("lawnSegmentation", () => {
     expect(pointInRing(pixelToLngLat([72, 40], [0, 0, 96, 96], 96, 96), result.polygon)).toBe(false);
   });
 
+  it("does not cross a visible hedge or shadow barrier into neighboring grass", () => {
+    const image = makeImageData(96, 96, [150, 150, 145]);
+    rect(image, 12, 12, 84, 44, [72, 136, 68]);
+    rect(image, 12, 48, 84, 84, [72, 136, 68]);
+    rect(image, 12, 44, 84, 48, [55, 72, 48]);
+
+    const result = segmentLawnImageData(image, crop([30, 30]), [], { createMaskPreview: false });
+    expect(result.polygon.length).toBeGreaterThanOrEqual(4);
+    expect(pointInRing(pixelToLngLat([30, 70], [0, 0, 96, 96], 96, 96), result.polygon)).toBe(false);
+  });
+
   it("keeps coordinate conversion stable", () => {
     const bbox: [number, number, number, number] = [12, 56, 12.001, 56.001];
     const px = lngLatToPixel([12.0005, 56.00075], bbox, 512, 512);
