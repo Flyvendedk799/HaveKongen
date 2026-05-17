@@ -20,8 +20,8 @@ type Imagery = "ortofoto" | "mapbox";
 
 const AUTOSAVE_KEY = "havemaaler:draft:v2";
 const WAND_CROP_METERS = 36;
-const WAND_IMAGE_SIZE = 768;
-const WAND_TIMEOUT_MS = 18000;
+const WAND_IMAGE_SIZE = 512;
+const WAND_TIMEOUT_MS = 22000;
 
 function ringBbox(ring?: Ring | null): [number, number, number, number] | undefined {
   if (!ring || ring.length < 3) return undefined;
@@ -617,11 +617,18 @@ export default function GardenSizer() {
       }).finally(() => window.clearTimeout(timeout));
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.polygon) {
-        const msg = data?.error || response.statusText || "";
+        const code = String(data?.error || "");
+        const msg = data?.detail || data?.error || response.statusText || "";
         if ((data as any)?.noLawn) toast.error(`Ingen plæne fundet på dette punkt — klik et tydeligt sted på græsset, eller tegn manuelt`);
-        else if (msg.toLowerCase().includes("abort")) toast.error("AI tog for lang tid — prøv et mindre klik midt på plænen eller tegn manuelt");
+        else if (code === "ai_timeout" || response.status === 504 || msg.toLowerCase().includes("abort")) toast.error("AI tog for lang tid — prøv et tydeligt klik midt på plænen eller tegn manuelt");
+        else if (code === "ai_credits_exhausted" || response.status === 402) toast.error("AI-kreditter brugt op");
+        else if (code === "ai_rate_limited" || response.status === 429) toast.error("Travl gateway — prøv igen om lidt");
+        else if (code === "imagery_fetch_failed") toast.error("Kunne ikke hente satellitbillede — prøv igen om lidt");
+        else if (code === "outside_parcel") toast.error("Klik inden for den markerede matrikel");
+        else if (code === "invalid_geometry") toast.error("AI-forslaget var usikkert — prøv et tydeligere klik midt på plænen");
+        else if (code === "missing_config") toast.error("AI-opmåling er ikke konfigureret");
         else if ((data as any)?.fallback) toast.error("AI-tjenesten er midlertidigt utilgængelig — prøv igen om lidt eller tegn manuelt");
-        else toast.error(msg.includes("402") ? "AI-kreditter brugt op" : msg.includes("429") ? "Travl gateway — prøv igen om lidt" : "AI-opmåling fejlede");
+        else toast.error("AI-opmåling fejlede");
         return;
       }
       const ring = data.polygon as LngLat[];
@@ -901,7 +908,7 @@ export default function GardenSizer() {
                     <div style={{ position: "absolute", inset: 0, zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(20,39,29,0.35)", backdropFilter: "blur(2px)", borderRadius: "inherit", pointerEvents: "none" }}>
                       <div style={{ background: "rgba(20,39,29,0.85)", border: "1px solid var(--gold)", color: "var(--gold)", padding: "14px 22px", borderRadius: 12, fontSize: 13, letterSpacing: 0.4, fontFamily: "JetBrains Mono, monospace", display: "flex", alignItems: "center", gap: 10 }}>
                         <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--gold)", animation: "pulse 1.2s ease-in-out infinite" }} />
-                        AI ANALYSERER · GEMINI 2.5 PRO
+                        AI ANALYSERER · GEMINI 2.5 FLASH
                       </div>
                     </div>
                   )}

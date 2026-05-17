@@ -1,11 +1,9 @@
-// segment-lawn v4: fast, parcel-aware lawn segmentation.
-// Improvements vs v2:
-//  - Pro model first (Gemini 2.5 Pro), flash as fallback
-//  - 1024px crop, 70m default window (~7 cm/px) for sharper boundaries
-//  - Strict prompt with chain-of-thought + structured JSON (polygon, confidence, exclusions, notes)
-//  - Validates: contains click pixel, plausible area, monotonic vertices
-//  - Auto-refines: if click not inside or confidence < 0.55, runs a 2nd pass with the
-//    failed polygon shown back to the model for correction
+// segment-lawn v5: fast, parcel-aware lawn segmentation.
+// Design:
+//  - Gemini 2.5 Flash only, with a hard latency budget that fits the browser timeout
+//  - 512px crop, 36m default window (~7 cm/px), matching the source imagery detail
+//  - Strict structured JSON (polygon, confidence, exclusions, notes)
+//  - Validates: contains click pixel, plausible area, non-self-intersection, parcel containment
 //  - Optional `excludePolygons` returned: model can flag flowerbeds/decks inside lawn
 //  - Smooths out near-duplicate vertices server-side
 
@@ -15,6 +13,31 @@ const corsHeaders = {
 };
 
 const LOVABLE_API = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const FLASH_MODEL = "google/gemini-2.5-flash";
+const MODEL_TIMEOUT_MS = 13500;
+const DEFAULT_CROP_METERS = 36;
+const DEFAULT_IMAGE_SIZE = 512;
+const MIN_IMAGE_SIZE = 256;
+const MAX_IMAGE_SIZE = 640;
+const MIN_CROP_METERS = 16;
+const MAX_CROP_METERS = 70;
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.round(clampNumber(value, fallback, min, max));
+}
 
 function hashKey(s: string): string {
   let h = 5381;
@@ -39,11 +62,15 @@ function pointInPoly(px: number, py: number, poly: [number, number][]): boolean 
 
 // Shoelace area in pixel² for sanity check
 function polyAreaPx(poly: [number, number][]): number {
+  return Math.abs(signedAreaPx(poly));
+}
+
+function signedAreaPx(poly: [number, number][]): number {
   let a = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+    a += (poly[j][0] * poly[i][1]) - (poly[i][0] * poly[j][1]);
   }
-  return Math.abs(a) / 2;
+  return a / 2;
 }
 
 // Drop near-duplicate vertices (< 4px apart)
@@ -60,7 +87,11 @@ function dedupeVertices(poly: [number, number][]): [number, number][] {
   return out;
 }
 
-async function callModel(model: string, prompt: string, b64: string, aiKey: string, timeoutMs = 13500): Promise<string | null> {
+type ModelResult =
+  | { ok: true; content: string }
+  | { ok: false; code: string; status: number; detail: string };
+
+async function callModel(model: string, prompt: string, b64: string, aiKey: string, timeoutMs = MODEL_TIMEOUT_MS): Promise<ModelResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -71,6 +102,7 @@ async function callModel(model: string, prompt: string, b64: string, aiKey: stri
       body: JSON.stringify({
         model,
         temperature: 0.1,
+        max_tokens: 1600,
         response_format: { type: "json_object" },
         messages: [{
           role: "user",
@@ -84,13 +116,22 @@ async function callModel(model: string, prompt: string, b64: string, aiKey: stri
     if (!r.ok) {
       const errTxt = await r.text().catch(() => "");
       console.warn(`[${model}] HTTP ${r.status}: ${errTxt.slice(0, 200)}`);
-      return null;
+      if (r.status === 402) return { ok: false, code: "ai_credits_exhausted", status: 402, detail: "AI credits exhausted" };
+      if (r.status === 429) return { ok: false, code: "ai_rate_limited", status: 429, detail: "AI gateway rate limited" };
+      return { ok: false, code: "ai_upstream_error", status: 502, detail: `AI gateway returned HTTP ${r.status}` };
     }
     const j = await r.json();
-    return j.choices?.[0]?.message?.content ?? "";
+    const content = j.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      return { ok: false, code: "ai_empty_response", status: 502, detail: "AI gateway returned an empty response" };
+    }
+    return { ok: true, content };
   } catch (e) {
     console.warn(`[${model}] fetch error:`, String(e));
-    return null;
+    if ((e as any)?.name === "AbortError") {
+      return { ok: false, code: "ai_timeout", status: 504, detail: `AI gateway timed out after ${timeoutMs}ms` };
+    }
+    return { ok: false, code: "ai_network_error", status: 502, detail: "AI gateway request failed" };
   } finally {
     clearTimeout(timeout);
   }
@@ -108,14 +149,14 @@ function buildPrompt(width: number, height: number, px: number, py: number, opts
 
   return `You are a precise aerial-imagery segmentation engine for Danish residential lawns.
 
-INPUT: A top-down ortophoto, ${width}x${height} pixels. The marker pixel (${px}, ${py}) is GUARANTEED to be on grass.
+INPUT: A top-down ortophoto, ${width}x${height} pixels. The marker pixel (${px}, ${py}) is the user's intended lawn point.
 
 GOAL: Trace the OUTER BOUNDARY of the SINGLE connected lawn region that contains the marker pixel.
 
 INCLUDE: continuous grass, mowed strips, areas with patchy/yellowing grass that are still maintained turf.
 EXCLUDE: buildings, roofs, driveways, parking, gravel/grus, terraces, wooden decks, paved paths, flowerbeds (bede), hedges, individual shrubs, trees with closed canopy, ponds/water, sand pits, bare soil, neighbouring lawns separated by hedge/fence/path.${hintNote}${parcelNote}
 
-REASONING: First, mentally identify the boundary by following the lawn's edge clockwise. Stay within 1-2 px of the visible transition. For curved edges use more vertices; for straight edges use fewer.
+If the marker is clearly not on grass, return an empty polygon with low confidence. Otherwise follow the visible lawn edge clockwise. Stay within 1-2 px of the visible transition. For curved edges use more vertices; for straight edges use fewer.
 
 OUTPUT — STRICT JSON only, no markdown, no commentary:
 {
@@ -126,7 +167,7 @@ OUTPUT — STRICT JSON only, no markdown, no commentary:
 }
 
 REQUIREMENTS:
-- polygon: 8-70 integer-pixel vertices, ordered clockwise along the boundary, MUST contain pixel (${px}, ${py}), no self-intersection, vertices in [0,${width}] x [0,${height}].
+- polygon: [] if marker is not on grass; otherwise 8-70 integer-pixel vertices, ordered clockwise along the boundary, MUST contain pixel (${px}, ${py}), no self-intersection, vertices in [0,${width}] x [0,${height}].
 - exclusions: 0-3 inner rings for non-lawn islands inside the main polygon (flowerbeds, ponds). Each 6-30 vertices. Empty array if none obvious.
 - confidence: honest estimate. 0.9+ = boundary unambiguous; 0.6-0.8 = some shaded/occluded edges; <0.6 = significant uncertainty.
 
@@ -139,16 +180,97 @@ function parseJson(txt: string): any | null {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
-Deno.serve(async (req) => {
+function parsePixelRing(raw: unknown, width: number, height: number): [number, number][] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: [number, number][] = [];
+  for (const p of raw) {
+    if (!Array.isArray(p) || p.length < 2) return null;
+    const x = Math.round(Number(p[0]));
+    const y = Math.round(Number(p[1]));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (x < 0 || x > width || y < 0 || y > height) return null;
+    out.push([x, y]);
+  }
+  return out;
+}
+
+function normalizeClockwise(poly: [number, number][]): [number, number][] {
+  // In image coordinates y grows downward, so positive shoelace area is visually clockwise.
+  return signedAreaPx(poly) >= 0 ? poly : [...poly].reverse();
+}
+
+function pointOnSegment(px: number, py: number, a: [number, number], b: [number, number]): boolean {
+  const cross = (px - a[0]) * (b[1] - a[1]) - (py - a[1]) * (b[0] - a[0]);
+  if (Math.abs(cross) > 1e-7) return false;
+  const dot = (px - a[0]) * (b[0] - a[0]) + (py - a[1]) * (b[1] - a[1]);
+  if (dot < -1e-7) return false;
+  const lenSq = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+  return dot <= lenSq + 1e-7;
+}
+
+function pointInOrOnPoly(px: number, py: number, poly: [number, number][]): boolean {
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (pointOnSegment(px, py, poly[j], poly[i])) return true;
+  }
+  return pointInPoly(px, py, poly);
+}
+
+function segmentOrientation(a: [number, number], b: [number, number], c: [number, number]): number {
+  const v = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1]);
+  if (Math.abs(v) < 1e-7) return 0;
+  return v > 0 ? 1 : 2;
+}
+
+function segmentsIntersect(a: [number, number], b: [number, number], c: [number, number], d: [number, number]): boolean {
+  const o1 = segmentOrientation(a, b, c);
+  const o2 = segmentOrientation(a, b, d);
+  const o3 = segmentOrientation(c, d, a);
+  const o4 = segmentOrientation(c, d, b);
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && pointOnSegment(c[0], c[1], a, b)) return true;
+  if (o2 === 0 && pointOnSegment(d[0], d[1], a, b)) return true;
+  if (o3 === 0 && pointOnSegment(a[0], a[1], c, d)) return true;
+  if (o4 === 0 && pointOnSegment(b[0], b[1], c, d)) return true;
+  return false;
+}
+
+function hasSelfIntersection(poly: [number, number][]): boolean {
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      const adjacent = j === i || j === (i + 1) % n || i === (j + 1) % n;
+      if (adjacent) continue;
+      const c = poly[j];
+      const d = poly[(j + 1) % n];
+      if (segmentsIntersect(a, b, c, d)) return true;
+    }
+  }
+  return false;
+}
+
+function ringInsideRing(inner: [number, number][], outer: [number, number][]): boolean {
+  return inner.every(([x, y]) => pointInOrOnPoly(x, y, outer));
+}
+
+function areaMetersFromPx(areaPx: number, width: number, height: number, bbox: [number, number, number, number], lat: number): number {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const widthM = Math.abs(maxLng - minLng) * 111320 * Math.cos((lat * Math.PI) / 180);
+  const heightM = Math.abs(maxLat - minLat) * 111320;
+  return (areaPx / (width * height)) * widthM * heightM;
+}
+
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const body = await req.json().catch(() => ({}));
-    const {
+    let {
       click,
-      cropMeters = 50,
-      width = 1024,
-      height = 1024,
+      cropMeters = DEFAULT_CROP_METERS,
+      width = DEFAULT_IMAGE_SIZE,
+      height = DEFAULT_IMAGE_SIZE,
       hint,
       parcelBbox,
       parcelPolygon,
@@ -158,21 +280,24 @@ Deno.serve(async (req) => {
       parcelPolygon?: [number, number][];
     };
 
-    if (!click || click.length !== 2) {
-      return new Response(JSON.stringify({ error: "click [lng,lat] required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!Array.isArray(click) || click.length !== 2 || !Number.isFinite(Number(click[0])) || !Number.isFinite(Number(click[1]))) {
+      return json({ error: "invalid_request", detail: "click [lng,lat] required" }, 400);
     }
 
     const dfToken = Deno.env.get("DATAFORSYNINGEN_TOKEN");
     const aiKey = Deno.env.get("LOVABLE_API_KEY");
     if (!dfToken || !aiKey) {
-      return new Response(JSON.stringify({ error: "missing tokens" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "missing_config", detail: "DATAFORSYNINGEN_TOKEN or LOVABLE_API_KEY missing" }, 500);
     }
 
-    const [clng, clat] = click;
+    cropMeters = clampNumber(cropMeters, DEFAULT_CROP_METERS, MIN_CROP_METERS, MAX_CROP_METERS);
+    width = clampInt(width, DEFAULT_IMAGE_SIZE, MIN_IMAGE_SIZE, MAX_IMAGE_SIZE);
+    height = clampInt(height, width, MIN_IMAGE_SIZE, MAX_IMAGE_SIZE);
+
+    const [clng, clat] = [Number(click[0]), Number(click[1])];
+    if (clng < -180 || clng > 180 || clat < -90 || clat > 90) {
+      return json({ error: "invalid_request", detail: "click coordinates out of range" }, 400);
+    }
     const half = cropMeters / 2;
     const { dLat, dLng } = metersToDeg(half, clat);
     let minLat = clat - dLat, maxLat = clat + dLat;
@@ -183,6 +308,9 @@ Deno.serve(async (req) => {
     if (parcelBbox && parcelBbox.length === 4) {
       const [pMinLng, pMinLat, pMaxLng, pMaxLat] = parcelBbox;
       const pad = metersToDeg(3, clat); // 3m breathing room
+      if (clng < pMinLng - pad.dLng || clng > pMaxLng + pad.dLng || clat < pMinLat - pad.dLat || clat > pMaxLat + pad.dLat) {
+        return json({ error: "outside_parcel", detail: "Click is outside the selected parcel" }, 422);
+      }
       minLng = Math.max(minLng, pMinLng - pad.dLng);
       maxLng = Math.min(maxLng, pMaxLng + pad.dLng);
       minLat = Math.max(minLat, pMinLat - pad.dLat);
@@ -201,7 +329,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    const cacheKey = hashKey(JSON.stringify({ click: [clng.toFixed(6), clat.toFixed(6)], cropMeters, width, height, hint: hint ?? "", parcel: parcelBbox?.map(n=>n.toFixed(5)).join(",") ?? "", v: 5 }));
+    if (!(minLng < maxLng) || !(minLat < maxLat)) {
+      return json({ error: "invalid_request", detail: "Crop bbox is empty" }, 400);
+    }
+
+    const cacheKey = hashKey(JSON.stringify({ click: [clng.toFixed(6), clat.toFixed(6)], cropMeters, width, height, hint: hint ?? "", parcel: parcelBbox?.map(n=>n.toFixed(5)).join(",") ?? "", v: 6 }));
     const supaUrl = Deno.env.get("SUPABASE_URL")!;
     const supaKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -229,9 +361,7 @@ Deno.serve(async (req) => {
     const imgRes = await fetch(wms, { headers: { "Accept-Encoding": "identity", "Accept": "image/jpeg" } });
     if (!imgRes.ok) {
       const t = await imgRes.text().catch(() => "");
-      return new Response(JSON.stringify({ error: "ortofoto fetch failed", status: imgRes.status, detail: t.slice(0, 200) }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "imagery_fetch_failed", status: imgRes.status, detail: t.slice(0, 200) }, 502);
     }
     const imgBuf = new Uint8Array(await imgRes.arrayBuffer());
     let bin = "";
@@ -248,26 +378,28 @@ Deno.serve(async (req) => {
       Math.round(((lng - minLng) / (maxLng - minLng)) * width),
       Math.round(((maxLat - lat) / (maxLat - minLat)) * height),
     ];
-    const parcelPixels = Array.isArray(parcelPolygon) && parcelPolygon.length >= 3
+    const rawParcelPixels = Array.isArray(parcelPolygon) && parcelPolygon.length >= 3
       ? parcelPolygon.map(ll2px).filter(([x, y]) => x >= -80 && x <= width + 80 && y >= -80 && y <= height + 80)
-      : undefined;
+      : [];
+    const parcelPixels = rawParcelPixels.length >= 3 ? rawParcelPixels : undefined;
 
     const models: Array<{ id: string; timeout: number }> = [
-      { id: "google/gemini-2.5-flash", timeout: 14000 },
-      { id: "google/gemini-2.5-pro", timeout: 28000 },
+      { id: FLASH_MODEL, timeout: MODEL_TIMEOUT_MS },
     ];
 
     let best: { polygon: [number, number][]; exclusions: [number, number][][]; confidence: number; notes?: string } | null = null;
     let lastError = "";
+    let lastFailure: ModelResult | null = null;
     let noLawnNote: string | null = null;
 
     for (const m of models) {
       const model = m.id;
-      const txt1 = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey, m.timeout);
-      if (!txt1) { lastError = `${model}: no response (timeout or upstream error)`; continue; }
-      let parsed = parseJson(txt1);
+      const result = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey, m.timeout);
+      if (!result.ok) { lastFailure = result; lastError = `${model}: ${result.detail}`; continue; }
+      let parsed = parseJson(result.content);
       if (!parsed) {
-        console.warn(`[${model}] unparseable response (first 400 chars):`, txt1.slice(0, 400));
+        console.warn(`[${model}] unparseable response (first 400 chars):`, result.content.slice(0, 400));
+        lastFailure = { ok: false, code: "ai_bad_response", status: 502, detail: "AI response was not valid JSON" };
         lastError = `${model}: unparseable response`;
         continue;
       }
@@ -280,31 +412,51 @@ Deno.serve(async (req) => {
       }
       if (!parsed.polygon || !Array.isArray(parsed.polygon) || parsed.polygon.length < 4) {
         console.warn(`[${model}] bad polygon (len=${parsed?.polygon?.length}). Raw:`, JSON.stringify(parsed).slice(0, 400));
+        lastFailure = { ok: false, code: "ai_bad_response", status: 502, detail: "AI response did not include a usable polygon" };
         lastError = `${model}: invalid polygon shape (len=${parsed?.polygon?.length ?? 0})`;
         continue;
       }
 
-      let poly = dedupeVertices(parsed.polygon.map((p: any) => [Math.round(p[0]), Math.round(p[1])] as [number, number]));
+      const rawPoly = parsePixelRing(parsed.polygon, width, height);
+      if (!rawPoly) {
+        lastFailure = { ok: false, code: "invalid_geometry", status: 422, detail: "polygon contains invalid coordinates" };
+        lastError = `${model}: polygon contains invalid coordinates`;
+        continue;
+      }
+      let poly = normalizeClockwise(dedupeVertices(rawPoly));
       const area = polyAreaPx(poly);
       const minArea = (width * height) * 0.005;
       const maxArea = (width * height) * 0.95;
-      const containsClick = pointInPoly(px, py, poly);
+      const areaM2 = areaMetersFromPx(area, width, height, [minLng, minLat, maxLng, maxLat], clat);
+      const containsClick = pointInOrOnPoly(px, py, poly);
 
       let failureReason = "";
       if (!containsClick) failureReason = `polygon does not contain marker pixel (${px}, ${py})`;
       else if (area < minArea) failureReason = `polygon too small (${Math.round(area)} px², expected > ${Math.round(minArea)})`;
       else if (area > maxArea) failureReason = `polygon covers nearly the whole crop — likely the wrong region`;
+      else if (areaM2 < 4) failureReason = `polygon area too small (${areaM2.toFixed(1)} m²)`;
+      else if (areaM2 > 5000) failureReason = `polygon area too large (${Math.round(areaM2)} m²)`;
+      else if (hasSelfIntersection(poly)) failureReason = "polygon self-intersects";
+      else if (parcelPixels?.length && !ringInsideRing(poly, parcelPixels)) failureReason = "polygon leaves parcel boundary";
 
       const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0.7;
       if (!failureReason && conf < 0.45) failureReason = `low confidence (${conf.toFixed(2)})`;
 
-      if (failureReason) { lastError = `${model}: ${failureReason}`; continue; }
+      if (failureReason) {
+        lastFailure = { ok: false, code: "invalid_geometry", status: 422, detail: failureReason };
+        lastError = `${model}: ${failureReason}`;
+        continue;
+      }
 
       const exclusions: [number, number][][] = Array.isArray(parsed.exclusions)
         ? parsed.exclusions
             .filter((r: any) => Array.isArray(r) && r.length >= 4)
-            .map((r: any[]) => dedupeVertices(r.map((p: any) => [Math.round(p[0]), Math.round(p[1])] as [number, number])))
+            .map((r: any[]) => parsePixelRing(r, width, height))
+            .filter((r: [number, number][] | null): r is [number, number][] => !!r)
+            .map((r: [number, number][]) => normalizeClockwise(dedupeVertices(r)))
             .filter((r: [number, number][]) => r.length >= 4)
+            .filter((r: [number, number][]) => !hasSelfIntersection(r))
+            .filter((r: [number, number][]) => ringInsideRing(r, poly))
         : [];
 
       best = {
@@ -318,13 +470,12 @@ Deno.serve(async (req) => {
 
     if (!best) {
       if (noLawnNote) {
-        return new Response(JSON.stringify({ error: "no_lawn", detail: noLawnNote, noLawn: true }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: "no_lawn", detail: noLawnNote, noLawn: true }, 422);
       }
-      return new Response(JSON.stringify({ error: "ai failed", detail: lastError, fallback: true }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (lastFailure && !lastFailure.ok) {
+        return json({ error: lastFailure.code, detail: lastFailure.detail, fallback: true }, lastFailure.status);
+      }
+      return json({ error: "ai_failed", detail: lastError, fallback: true }, 502);
     }
 
     // pixel -> lng/lat
@@ -344,22 +495,20 @@ Deno.serve(async (req) => {
             apikey: supaKey, Authorization: `Bearer ${supaKey}`,
             "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates",
           },
-          body: JSON.stringify({ bbox_hash: cacheKey, polygon: lnglat, source: "gemini-v3" }),
+          body: JSON.stringify({ bbox_hash: cacheKey, polygon: lnglat, source: "gemini-flash-v5" }),
         });
       } catch (e) { console.warn("cache write failed:", String(e)); }
     }
 
-    return new Response(JSON.stringify({
+    return json({
       polygon: lnglat,
       exclusions: exclusionsLL,
       cached: false,
       confidence: best.confidence,
       notes: best.notes,
       bbox: [minLng, minLat, maxLng, maxLat],
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  } catch (e) {
+    return json({ error: "server_error", detail: String(e) }, 500);
   }
 });
