@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { fileToDataUrl, uploadPlantPhoto } from "@/lib/plantPhotos";
-import { actionFromScan } from "@/lib/companionActions";
-import { asNumberConfidence, mapAnchor, normalizeScanResult, type ObservationKind } from "@/lib/companionTypes";
+import { actionFromScan, actionsFromBedScan, actionsFromGrowth } from "@/lib/companionActions";
+import { asNumberConfidence, mapAnchor, normalizeScanResult, type CareAction, type ObservationKind } from "@/lib/companionTypes";
 
 type ScanMode = "identify" | "diagnosis" | "growth" | "bed_scan" | "photo" | "harvest";
 
@@ -53,6 +53,25 @@ function severityText(value: unknown) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function taskRowsFromActions(userId: string, actions: Omit<CareAction, "id">[]) {
+  return actions.map((action) => ({
+    user_id: userId,
+    garden_id: action.garden_id,
+    zone_id: action.zone_id ?? null,
+    plant_id: action.plant_id ?? null,
+    observation_id: action.observation_id ?? null,
+    kind: action.kind,
+    title: action.title,
+    notes: action.reason ?? null,
+    due_at: action.due_at ?? null,
+    priority: action.priority,
+    source: action.source,
+    reason: action.reason ?? null,
+    confidence: action.confidence ?? null,
+    payload: action.payload ?? {},
+  }));
 }
 
 export default function GardenCamera({ userId, garden, zones, plants, observations, defaultZoneId, onSaved }: Props) {
@@ -284,6 +303,18 @@ export default function GardenCamera({ userId, garden, zones, plants, observatio
             lifecycle_status: rawResult.stage ? String(rawResult.stage) : "observed",
             last_observed_at: new Date().toISOString(),
           }).eq("id", selectedPlant.id);
+        }
+
+        const growthActions = actionsFromGrowth(garden.id, rawResult, observation.id, selectedZone?.id ?? null, selectedPlant?.id ?? null);
+        if (growthActions.length > 0) {
+          await supabase.from("task_log").insert(taskRowsFromActions(userId, growthActions));
+        }
+      }
+
+      if (mode === "bed_scan") {
+        const bedActions = actionsFromBedScan(garden.id, rawResult, observation.id, selectedZone?.id ?? null, selectedPlant?.id ?? null);
+        if (bedActions.length > 0) {
+          await supabase.from("task_log").insert(taskRowsFromActions(userId, bedActions));
         }
       }
 

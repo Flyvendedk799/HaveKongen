@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { actionFromScan, generateDeviceActions, generateWeatherActions } from "@/lib/companionActions";
-import { clampNormalizedPoint, mapAnchor, normalizeScanResult } from "@/lib/companionTypes";
+import { actionFromScan, actionsFromBedScan, actionsFromGrowth, generateDeviceActions, generateWeatherActions } from "@/lib/companionActions";
+import { clampNormalizedPoint, mapAnchor, normalizeScanResult, readCompanionPreferences } from "@/lib/companionTypes";
 
 describe("companion map anchors", () => {
   it("clamps normalized positions away from unusable edges", () => {
@@ -44,6 +44,33 @@ describe("companion scan normalization", () => {
     const scan = normalizeScanResult({ diagnosis: "Ser sund ud", severity: "low", treatment: "Hold øje." });
     expect(actionFromScan("garden-1", scan, "obs-1")).toBeNull();
   });
+
+  it("turns bed scan task suggestions into mapped care actions", () => {
+    const actions = actionsFromBedScan("garden-1", {
+      confidence: 0.74,
+      task_suggestions: [
+        { title: "Lug ukrudt i tomatbedet", priority: "medium", reason: "Bedet er tæt ved kanten." },
+      ],
+    }, "obs-2", "zone-1");
+
+    expect(actions[0]).toMatchObject({
+      kind: "bed_followup",
+      priority: "high",
+      source: "scan",
+      zone_id: "zone-1",
+      observation_id: "obs-2",
+    });
+  });
+
+  it("creates growth actions for anomalies and harvest readiness", () => {
+    const actions = actionsFromGrowth("garden-1", {
+      confidence: 0.7,
+      anomaly_flags: ["gulning"],
+      harvest_readiness: "klar",
+    }, "obs-3", "zone-1", "plant-1");
+
+    expect(actions.map((action) => action.kind)).toEqual(expect.arrayContaining(["growth_anomaly", "harvest_ready"]));
+  });
 });
 
 describe("companion deterministic suggestions", () => {
@@ -65,5 +92,23 @@ describe("companion deterministic suggestions", () => {
       { id: "d1", name: "Sensor 1", kind: "sensor", status: "online", battery: 18, metadata: { zone_id: "z1", moisture_pct: 22 } },
     ]);
     expect(actions.map((a) => a.kind)).toEqual(expect.arrayContaining(["device_battery", "sensor_dry"]));
+  });
+});
+
+describe("companion preferences", () => {
+  it("normalizes automation and onboarding preferences", () => {
+    expect(readCompanionPreferences({
+      goals: ["Høst"],
+      weekly_time_budget_minutes: 999,
+      automation_mode: "device_autopilot",
+      notification_preference: "urgent",
+      device_autopilot_confirmed: true,
+    })).toMatchObject({
+      goals: ["Høst"],
+      weekly_time_budget_minutes: 720,
+      automation_mode: "device_autopilot",
+      notification_preference: "urgent",
+      device_autopilot_confirmed: true,
+    });
   });
 });

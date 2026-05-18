@@ -165,6 +165,14 @@ export default function GardenMap({
   }
 
   const visiblePins = selectedZoneId ? pins.filter((p) => p.zone_id === selectedZoneId || p.type === "device") : pins;
+  const selectedZone = selectedZoneId ? zones.find((zone) => zone.id === selectedZoneId) ?? null : null;
+  const zonePlants = selectedZoneId ? plants.filter((plant) => plant.zone_id === selectedZoneId) : plants;
+  const zoneObservations = selectedZoneId ? observations.filter((obs) => obs.zone_id === selectedZoneId) : observations;
+  const zoneDevices = selectedZoneId
+    ? devices.filter((device) => readZoneId(device.metadata) === selectedZoneId)
+    : devices;
+  const latestDiagnosis = zoneObservations.find((obs) => obs.kind === "diagnosis" || obs.kind === "bed_scan");
+  const latestGrowth = zoneObservations.find((obs) => obs.kind === "growth");
 
   return (
     <div className="companion-map-shell">
@@ -236,6 +244,84 @@ export default function GardenMap({
           );
         })}
       </div>
+
+      <div className="companion-zone-memory">
+        <article className="companion-memory-summary">
+          <div>
+            <div className="companion-eyebrow">{selectedZone ? "Zonehukommelse" : "Havehukommelse"}</div>
+            <h3>{selectedZone?.name ?? "Hele haven"}</h3>
+            <p>
+              {selectedZone
+                ? `${selectedZone.type} · ${selectedZone.area_m2 ? `${Math.round(selectedZone.area_m2)} m2` : "areal ukendt"} · ${selectedZone.soil || "jord ukendt"}`
+                : "Vælg en zone på kortet for at se lokal historik og anbefalingsgrundlag."}
+            </p>
+          </div>
+          <div className="companion-memory-kpis">
+            <span><Sprout size={14} /> {zonePlants.length} planter</span>
+            <span><Camera size={14} /> {zoneObservations.length} scans</span>
+            <span><Radio size={14} /> {zoneDevices.length} enheder</span>
+          </div>
+        </article>
+
+        <div className="companion-memory-grid">
+          <MemoryCard
+            icon={<Leaf size={15} />}
+            title="Seneste diagnose"
+            value={latestDiagnosis?.caption || resultTitle(latestDiagnosis?.ai_result) || "Ingen diagnose endnu"}
+            meta={latestDiagnosis ? dateLabel(latestDiagnosis.created_at) : "Scan en plante eller et bed"}
+          />
+          <MemoryCard
+            icon={<Sprout size={15} />}
+            title="Seneste vækst"
+            value={latestGrowth?.caption || resultTitle(latestGrowth?.ai_result) || "Ingen vækstlinje endnu"}
+            meta={latestGrowth ? dateLabel(latestGrowth.created_at) : "Kræver mindst to observationer for trend"}
+          />
+          <MemoryCard
+            icon={<Droplets size={15} />}
+            title="Sensorlag"
+            value={zoneDevices.length ? `${zoneDevices.length} enheder placeret` : "Ingen enheder placeret"}
+            meta={zoneDevices[0]?.status || "Tilføj sensor eller ventil"}
+          />
+        </div>
+
+        {zoneObservations.length > 0 && (
+          <div className="companion-memory-timeline">
+            {zoneObservations.slice(0, 5).map((obs) => (
+              <div key={obs.id}>
+                {obs.image_url ? <img src={obs.image_url} alt="" /> : <Camera size={15} />}
+                <div>
+                  <strong>{obs.caption || resultTitle(obs.ai_result) || obs.kind}</strong>
+                  <span>{obs.kind} · {dateLabel(obs.created_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function dateLabel(iso?: string | null) {
+  if (!iso) return "uden dato";
+  return new Date(iso).toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+}
+
+function resultTitle(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  return String(row.diagnosis || row.summary || row.name_da || row.stage || "");
+}
+
+function MemoryCard({ icon, title, value, meta }: { icon: React.ReactNode; title: string; value: string; meta: string }) {
+  return (
+    <article className="companion-memory-card">
+      <div className="companion-metric-icon">{icon}</div>
+      <div>
+        <span>{title}</span>
+        <strong>{value}</strong>
+        <small>{meta}</small>
+      </div>
+    </article>
   );
 }

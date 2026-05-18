@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BarChart3, CalendarDays, Droplets, Leaf, Map, NotebookPen, Radio, Sprout, Users } from "lucide-react";
+import { BarChart3, CalendarDays, CheckCircle2, CloudSun, Droplets, Gauge, Leaf, NotebookPen, PlugZap, Radio, ShieldCheck, Sprout, Users, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { Button } from "@/components/ui/button";
@@ -8,13 +8,15 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
-import type { CompanionView, CareAction, MapAnchor } from "@/lib/companionTypes";
+import type { CompanionView, CareAction, CompanionPreferences as CompanionPreferencesState, MapAnchor } from "@/lib/companionTypes";
+import { readCompanionPreferences } from "@/lib/companionTypes";
 import { generateDeviceActions, generateWeatherActions } from "@/lib/companionActions";
 import { fetchForecast, type Forecast, type Schedule, weekSummary } from "@/lib/wateringAI";
 import CompanionToday from "@/components/companion/CompanionToday";
 import GardenMap from "@/components/companion/GardenMap";
 import GardenCamera from "@/components/companion/GardenCamera";
 import CarePlan from "@/components/companion/CarePlan";
+import CompanionPreferences from "@/components/companion/CompanionPreferences";
 import MorningBriefing from "@/components/watering/MorningBriefing";
 import CalendarTimeline from "@/components/watering/CalendarTimeline";
 import JournalTab from "@/components/watering/JournalTab";
@@ -33,6 +35,9 @@ type Plant = Tables<"user_plants"> & {
 };
 type Observation = Tables<"garden_observations">;
 type Device = Tables<"devices">;
+type DeviceAction = Tables<"device_actions">;
+type DeviceReading = Tables<"device_readings">;
+type IntegrationConnection = Tables<"integration_connections">;
 type Task = Tables<"task_log">;
 type EventRow = Tables<"watering_events">;
 type CatalogCalendar = {
@@ -120,6 +125,28 @@ function readAnchor(anchor: unknown): MapAnchor {
   return (anchor && typeof anchor === "object" ? anchor : {}) as MapAnchor;
 }
 
+function normalizeSuggestion(gardenId: string, value: unknown): Omit<CareAction, "id"> | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const title = typeof row.title === "string" ? row.title : null;
+  if (!title) return null;
+  return {
+    kind: typeof row.kind === "string" ? row.kind : "companion_action",
+    title,
+    reason: typeof row.reason === "string" ? row.reason : null,
+    priority: row.priority === "urgent" || row.priority === "high" || row.priority === "normal" || row.priority === "low" ? row.priority : "normal",
+    due_at: typeof row.due_at === "string" ? row.due_at : null,
+    status: "open",
+    source: sourceOf(typeof row.source === "string" ? row.source : null),
+    confidence: typeof row.confidence === "number" ? row.confidence : null,
+    garden_id: typeof row.garden_id === "string" ? row.garden_id : gardenId,
+    zone_id: typeof row.zone_id === "string" ? row.zone_id : null,
+    plant_id: typeof row.plant_id === "string" ? row.plant_id : null,
+    observation_id: typeof row.observation_id === "string" ? row.observation_id : null,
+    payload: (row.payload && typeof row.payload === "object" ? row.payload : {}) as Json,
+  };
+}
+
 export default function GardenCompanion() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -133,6 +160,11 @@ export default function GardenCompanion() {
   const [observations, setObservations] = useState<Observation[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
+  const [deviceReadings, setDeviceReadings] = useState<DeviceReading[]>([]);
+  const [deviceActions, setDeviceActions] = useState<DeviceAction[]>([]);
+  const [remoteSuggestions, setRemoteSuggestions] = useState<Omit<CareAction, "id">[]>([]);
+  const [generatingActions, setGeneratingActions] = useState(false);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [forecasts, setForecasts] = useState<Forecast[]>([]);
@@ -164,6 +196,10 @@ export default function GardenCompanion() {
       setObservations([]);
       setTasks([]);
       setDevices([]);
+      setConnections([]);
+      setDeviceReadings([]);
+      setDeviceActions([]);
+      setRemoteSuggestions([]);
       setSchedules([]);
       setEvents([]);
       setLoading(false);
@@ -176,6 +212,9 @@ export default function GardenCompanion() {
       { data: observationRows },
       { data: taskRows },
       { data: deviceRows },
+      { data: connectionRows },
+      { data: readingRows },
+      { data: deviceActionRows },
       { data: scheduleRows },
       { data: eventRows },
     ] = await Promise.all([
@@ -187,6 +226,9 @@ export default function GardenCompanion() {
       supabase.from("garden_observations").select("*").eq("garden_id", active.id).order("created_at", { ascending: false }).limit(200),
       supabase.from("task_log").select("*").eq("garden_id", active.id).order("due_at", { ascending: true, nullsFirst: false }).limit(120),
       supabase.from("devices").select("*").eq("garden_id", active.id).order("created_at", { ascending: false }),
+      supabase.from("integration_connections").select("*").eq("garden_id", active.id).order("updated_at", { ascending: false }),
+      supabase.from("device_readings").select("*").eq("garden_id", active.id).order("observed_at", { ascending: false }).limit(120),
+      supabase.from("device_actions").select("*").eq("garden_id", active.id).order("created_at", { ascending: false }).limit(60),
       supabase.from("watering_schedules").select("*").eq("user_id", user.id),
       supabase.from("watering_events").select("*").eq("user_id", user.id).order("scheduled_for", { ascending: false }).limit(250),
     ]);
@@ -196,6 +238,10 @@ export default function GardenCompanion() {
     setObservations((observationRows ?? []) as Observation[]);
     setTasks((taskRows ?? []) as Task[]);
     setDevices((deviceRows ?? []) as Device[]);
+    setConnections((connectionRows ?? []) as IntegrationConnection[]);
+    setDeviceReadings((readingRows ?? []) as DeviceReading[]);
+    setDeviceActions((deviceActionRows ?? []) as DeviceAction[]);
+    setRemoteSuggestions([]);
     setSchedules((scheduleRows ?? []) as Schedule[]);
     setEvents((eventRows ?? []) as EventRow[]);
     setLoading(false);
@@ -234,6 +280,7 @@ export default function GardenCompanion() {
   }, [plants]);
 
   const zoneNames = useMemo(() => Object.fromEntries(zones.map((z) => [z.id, z.name])), [zones]);
+  const preferences = useMemo(() => readCompanionPreferences(garden?.preferences), [garden?.preferences]);
   const plantsByZone = useMemo(() => {
     const map: Record<string, ZonePlant[]> = {};
     plants.forEach((plant) => {
@@ -260,10 +307,11 @@ export default function GardenCompanion() {
     if (!garden) return [];
     const existingTitles = new Set(actions.filter((a) => a.status !== "done").map((a) => a.title));
     return [
+      ...remoteSuggestions,
       ...generateWeatherActions(garden.id, zones, forecasts),
       ...generateDeviceActions(garden.id, devices),
     ].filter((a) => !existingTitles.has(a.title));
-  }, [actions, devices, forecasts, garden, zones]);
+  }, [actions, devices, forecasts, garden, remoteSuggestions, zones]);
 
   async function completeAction(id: string) {
     const { error } = await supabase.from("task_log").update({ done: true, done_at: new Date().toISOString() }).eq("id", id);
@@ -295,6 +343,48 @@ export default function GardenCompanion() {
     }
     setTasks((prev) => [...prev, data as Task]);
     toast.success("Tilføjet til plejeplanen");
+  }
+
+  async function savePreferences(next: CompanionPreferencesState) {
+    if (!garden) return;
+    const preferencesJson = next as unknown as Json;
+    const { error } = await supabase.from("gardens").update({
+      preferences: preferencesJson,
+      updated_at: new Date().toISOString(),
+    }).eq("id", garden.id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setGarden((prev) => prev ? { ...prev, preferences: preferencesJson } as Garden : prev);
+    setGardens((prev) => prev.map((row) => row.id === garden.id ? { ...row, preferences: preferencesJson } as Garden : row));
+    toast.success("Driftsprofil gemt");
+  }
+
+  async function generateCompanionActions(persist = false) {
+    if (!garden) return;
+    setGeneratingActions(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-companion-actions", {
+        body: { garden_id: garden.id, persist },
+      });
+      if (error) throw error;
+      const rawActions = Array.isArray(data?.actions) ? data.actions : [];
+      const next = rawActions
+        .map((action) => normalizeSuggestion(garden.id, action))
+        .filter(Boolean) as Omit<CareAction, "id">[];
+      if (persist) {
+        await load();
+        toast.success(next.length ? "Kompagnonen lagde nye opgaver i planen" : "Ingen nye opgaver fundet");
+      } else {
+        setRemoteSuggestions(next);
+        toast.success(next.length ? "Nye forslag er hentet" : "Ingen nye forslag lige nu");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kunne ikke hente AI-forslag");
+    } finally {
+      setGeneratingActions(false);
+    }
   }
 
   async function movePlant(id: string, x: number, y: number) {
@@ -387,6 +477,7 @@ export default function GardenCompanion() {
               onPlan={() => setViewPersist("plan")}
               onCompleteAction={completeAction}
             />
+            <CompanionPreferences preferences={preferences} onChange={savePreferences} />
             <MorningBriefing userId={user.id} />
           </>
         )}
@@ -426,6 +517,8 @@ export default function GardenCompanion() {
             onComplete={completeAction}
             onSnooze={snoozeAction}
             onCreateSuggestion={createSuggestion}
+            onGenerateSuggestions={() => generateCompanionActions(false)}
+            generatingSuggestions={generatingActions}
           />
         )}
 
@@ -455,7 +548,22 @@ export default function GardenCompanion() {
             />
           )}
           {view === "journal" && <JournalTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} />}
-          {view === "devices" && <IoTTab gardenId={garden.id} zones={zones} />}
+          {view === "devices" && (
+            <>
+              <SmartGardenPanel
+                userId={user.id}
+                gardenId={garden.id}
+                zones={zones}
+                devices={devices}
+                connections={connections}
+                readings={deviceReadings}
+                deviceActions={deviceActions}
+                preferences={preferences}
+                onRefresh={load}
+              />
+              <IoTTab gardenId={garden.id} zones={zones} />
+            </>
+          )}
           {view === "yearwheel" && <CalendarTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} catalogBySlug={catalogBySlug} />}
           {view === "community" && <NeighborsTab />}
           {view === "insights" && <InsightsTab events={events} zones={zones} />}
@@ -463,6 +571,220 @@ export default function GardenCompanion() {
       </div>
       <SiteFooter />
     </>
+  );
+}
+
+const SMART_PROVIDERS = [
+  { kind: "sensor", provider: "soil-moisture", name: "Fugtsensorer", icon: Gauge, text: "Jordfugt og temperatur pr. zone." },
+  { kind: "irrigation", provider: "smart-valves", name: "Smart ventiler", icon: Droplets, text: "Klargør godkendte vandingshandlinger." },
+  { kind: "greenhouse", provider: "greenhouse-climate", name: "Drivhus klima", icon: Radio, text: "Luftfugt, varme og ventilation." },
+  { kind: "weather", provider: "local-weather", name: "Lokal vejrstation", icon: CloudSun, text: "Mere præcise regn- og vindsignaler." },
+  { kind: "mower", provider: "robot-mower", name: "Robotplæneklipper", icon: PlugZap, text: "Plænestatus og vedligeholdelsesvinduer." },
+] as const;
+
+function zoneName(zones: Pick<Zone, "id" | "name">[], zoneId?: string | null) {
+  if (!zoneId) return "Hele haven";
+  return zones.find((zone) => zone.id === zoneId)?.name ?? "Zone";
+}
+
+function deviceZone(device: Device) {
+  const metadata = device.metadata && typeof device.metadata === "object" ? device.metadata as Record<string, unknown> : {};
+  return typeof metadata.zone_id === "string" ? metadata.zone_id : null;
+}
+
+function actionStatus(status: string) {
+  if (status === "approved") return "Godkendt";
+  if (status === "executed") return "Udført";
+  if (status === "cancelled") return "Annulleret";
+  return "Afventer";
+}
+
+function SmartGardenPanel({
+  userId,
+  gardenId,
+  zones,
+  devices,
+  connections,
+  readings,
+  deviceActions,
+  preferences,
+  onRefresh,
+}: {
+  userId: string;
+  gardenId: string;
+  zones: Zone[];
+  devices: Device[];
+  connections: IntegrationConnection[];
+  readings: DeviceReading[];
+  deviceActions: DeviceAction[];
+  preferences: CompanionPreferencesState;
+  onRefresh: () => void;
+}) {
+  async function connect(provider: typeof SMART_PROVIDERS[number]) {
+    const existing = connections.find((row) => row.provider === provider.provider && row.kind === provider.kind);
+    if (existing) {
+      const { error } = await supabase.from("integration_connections").update({
+        status: "planned",
+        updated_at: new Date().toISOString(),
+      }).eq("id", existing.id);
+      if (error) toast.error(error.message);
+      else toast.success("Integration markeret til opsætning");
+      onRefresh();
+      return;
+    }
+
+    const { error } = await supabase.from("integration_connections").insert({
+      user_id: userId,
+      garden_id: gardenId,
+      kind: provider.kind,
+      provider: provider.provider,
+      display_name: provider.name,
+      status: "planned",
+      settings: { requested_from: "havekompagnon" } as Json,
+    });
+    if (error) toast.error(error.message);
+    else toast.success("Integration lagt klar");
+    onRefresh();
+  }
+
+  async function toggleDeviceAutopilot(device: Device) {
+    if (!preferences.device_autopilot_confirmed && !device.autopilot_enabled) {
+      toast.error("Bekræft enheds-autopilot i driftsprofilen først");
+      return;
+    }
+    const { error } = await supabase.from("devices").update({ autopilot_enabled: !device.autopilot_enabled }).eq("id", device.id);
+    if (error) toast.error(error.message);
+    else toast.success(device.autopilot_enabled ? "Enheds-autopilot slået fra" : "Enheds-autopilot slået til");
+    onRefresh();
+  }
+
+  async function updateAction(action: DeviceAction, status: "approved" | "cancelled") {
+    const { error } = await supabase.from("device_actions").update({
+      status,
+      approved_at: status === "approved" ? new Date().toISOString() : action.approved_at,
+    }).eq("id", action.id);
+    if (error) toast.error(error.message);
+    else toast.success(status === "approved" ? "Device-handling godkendt" : "Device-handling annulleret");
+    onRefresh();
+  }
+
+  const pendingActions = deviceActions.filter((action) => action.status === "pending" || action.status === "requested").slice(0, 5);
+  const latestReadings = readings.slice(0, 8);
+
+  return (
+    <div className="companion-integrations">
+      <section className="companion-band">
+        <div className="companion-section-head">
+          <div>
+            <div className="companion-eyebrow">Smart have</div>
+            <h2>Sensorer, ventiler og lokale signaler kobles til kortet.</h2>
+          </div>
+          <div className="companion-plan-count">
+            <Radio size={15} /> {connections.length} forbindelser
+          </div>
+        </div>
+
+        <div className="companion-provider-grid">
+          {SMART_PROVIDERS.map((provider) => {
+            const Icon = provider.icon;
+            const connection = connections.find((row) => row.provider === provider.provider && row.kind === provider.kind);
+            return (
+              <article key={provider.provider} className="companion-provider">
+                <div className="companion-provider-icon"><Icon size={17} /></div>
+                <div>
+                  <h3>{provider.name}</h3>
+                  <p>{provider.text}</p>
+                  <small>{connection ? `Status: ${connection.status}` : "Ikke forbundet"}</small>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => connect(provider)}>
+                  {connection ? "Klargør igen" : "Klargør"}
+                </Button>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="companion-smart-grid">
+        <article className="companion-band">
+          <div className="companion-section-head">
+            <div>
+              <div className="companion-eyebrow">Enheder på kortet</div>
+              <h2>Autopilot er opt-in pr. enhed.</h2>
+            </div>
+          </div>
+          {devices.length === 0 ? (
+            <div className="companion-empty"><Radio size={18} /> Ingen enheder endnu.</div>
+          ) : (
+            <div className="companion-device-list">
+              {devices.map((device) => (
+                <div key={device.id} className="companion-device-row">
+                  <div>
+                    <strong>{device.name}</strong>
+                    <span>{device.kind} · {zoneName(zones, deviceZone(device))} · {device.status}</span>
+                  </div>
+                  <button className={device.autopilot_enabled ? "active" : ""} onClick={() => toggleDeviceAutopilot(device)}>
+                    {device.autopilot_enabled ? "Autopilot" : "Manual"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+
+        <article className="companion-band">
+          <div className="companion-section-head">
+            <div>
+              <div className="companion-eyebrow">Målinger</div>
+              <h2>Seneste signaler der påvirker anbefalinger.</h2>
+            </div>
+          </div>
+          {latestReadings.length === 0 ? (
+            <div className="companion-empty"><Gauge size={18} /> Ingen sensorhistorik endnu.</div>
+          ) : (
+            <div className="companion-reading-list">
+              {latestReadings.map((reading) => (
+                <div key={reading.id}>
+                  <strong>{reading.kind}</strong>
+                  <span>{reading.value ?? "-"}{reading.unit ? ` ${reading.unit}` : ""}</span>
+                  <small>{zoneName(zones, reading.zone_id)} · {new Date(reading.observed_at).toLocaleDateString("da-DK")}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+
+      <section className="companion-band">
+        <div className="companion-section-head">
+          <div>
+            <div className="companion-eyebrow">Device-handlinger</div>
+            <h2>Ventiler og fysiske handlinger kræver tydelig godkendelse.</h2>
+          </div>
+          <ShieldCheck size={18} />
+        </div>
+        {pendingActions.length === 0 ? (
+          <div className="companion-empty"><CheckCircle2 size={18} /> Ingen afventende device-handlinger.</div>
+        ) : (
+          <div className="companion-device-actions">
+            {pendingActions.map((action) => (
+              <article key={action.id}>
+                <div>
+                  <span>{actionStatus(action.status)}</span>
+                  <h3>{action.action}</h3>
+                  {action.reason && <p>{action.reason}</p>}
+                  <small>{zoneName(zones, action.zone_id)}</small>
+                </div>
+                <div className="companion-task-actions">
+                  <Button variant="outline" size="sm" onClick={() => updateAction(action, "cancelled")}><XCircle size={14} className="mr-1.5" /> Nej</Button>
+                  <Button size="sm" onClick={() => updateAction(action, "approved")}><CheckCircle2 size={14} className="mr-1.5" /> Godkend</Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
