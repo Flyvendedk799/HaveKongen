@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BarChart3, CalendarDays, CheckCircle2, CloudSun, Droplets, Gauge, Leaf, NotebookPen, PlugZap, Radio, ShieldCheck, Sprout, Users, XCircle } from "lucide-react";
+import { BarChart3, CalendarDays, Camera, CheckCircle2, CloudSun, Droplets, Gauge, Leaf, MapPin, NotebookPen, PlugZap, Radio, ShieldCheck, Sprout, Users, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { Button } from "@/components/ui/button";
@@ -453,6 +453,16 @@ export default function GardenCompanion() {
           )}
         </header>
 
+        <ExperienceRail
+          view={view}
+          observations={observations.length}
+          zones={zones.length}
+          plants={plants.length}
+          actions={actions.filter((a) => a.status === "open").length}
+          devices={devices.length}
+          onSelect={setViewPersist}
+        />
+
         <nav className="companion-primary-nav" aria-label="Havekompagnon hovedvisning">
           {PRIMARY.map((item) => (
             <button key={item.key} className={view === item.key ? "active" : ""} onClick={() => setViewPersist(item.key)}>
@@ -468,13 +478,17 @@ export default function GardenCompanion() {
               zones={zones}
               plantCount={plants.reduce((sum, p) => sum + (p.qty || 1), 0)}
               openActions={actions.filter((a) => a.status === "open")}
+              suggestions={suggestions}
               forecast={forecasts[0] ?? null}
               plannedL={summary.plannedL}
               savedL={summary.savedL}
               devices={devices}
+              observations={observations}
+              preferences={preferences}
               onScan={() => setViewPersist("scan")}
               onMap={() => setViewPersist("map")}
               onPlan={() => setViewPersist("plan")}
+              onDevices={() => setViewPersist("devices")}
               onCompleteAction={completeAction}
             />
             <CompanionPreferences preferences={preferences} onChange={savePreferences} />
@@ -581,6 +595,50 @@ const SMART_PROVIDERS = [
   { kind: "weather", provider: "local-weather", name: "Lokal vejrstation", icon: CloudSun, text: "Mere præcise regn- og vindsignaler." },
   { kind: "mower", provider: "robot-mower", name: "Robotplæneklipper", icon: PlugZap, text: "Plænestatus og vedligeholdelsesvinduer." },
 ] as const;
+
+function ExperienceRail({
+  view,
+  observations,
+  zones,
+  plants,
+  actions,
+  devices,
+  onSelect,
+}: {
+  view: View;
+  observations: number;
+  zones: number;
+  plants: number;
+  actions: number;
+  devices: number;
+  onSelect: (view: View) => void;
+}) {
+  const steps = [
+    { key: "scan", label: "Foto", value: observations, target: 4, icon: Camera },
+    { key: "map", label: "Kort", value: zones + plants, target: 8, icon: MapPin },
+    { key: "plan", label: "Plan", value: actions, target: 3, icon: CheckCircle2 },
+    { key: "devices", label: "Smart", value: devices, target: 2, icon: Radio },
+  ] as const;
+
+  return (
+    <section className="companion-experience-rail" aria-label="Havekompagnon status">
+      {steps.map((step) => {
+        const Icon = step.icon;
+        const progress = Math.min(100, Math.round((step.value / step.target) * 100));
+        return (
+          <button key={step.key} className={view === step.key ? "active" : ""} onClick={() => onSelect(step.key)}>
+            <span className="companion-rail-icon"><Icon size={16} /></span>
+            <span>
+              <strong>{step.label}</strong>
+              <small>{step.value}</small>
+            </span>
+            <i><b style={{ width: `${progress}%` }} /></i>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
 
 function zoneName(zones: Pick<Zone, "id" | "name">[], zoneId?: string | null) {
   if (!zoneId) return "Hele haven";

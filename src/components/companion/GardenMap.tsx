@@ -243,6 +243,13 @@ export default function GardenMap({
             </button>
           );
         })}
+
+        <div className="companion-map-legend" aria-label="Kortlag">
+          <span><i className="plant" /> Plante</span>
+          <span><i className="photo" /> Foto</span>
+          <span><i className="warn" /> Risiko</span>
+          <span><i className="device" /> Sensor</span>
+        </div>
       </div>
 
       <div className="companion-zone-memory">

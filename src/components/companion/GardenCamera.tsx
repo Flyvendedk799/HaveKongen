@@ -95,6 +95,12 @@ export default function GardenCamera({ userId, garden, zones, plants, observatio
   const selectedZone = zoneId === "none" ? null : zones.find((z) => z.id === zoneId) ?? null;
   const selectedPlant = plantId === "none" ? null : plants.find((p) => p.id === plantId) ?? null;
   const modeMeta = MODES.find((m) => m.key === mode)!;
+  const scanRoute = [
+    { label: "Foto", done: Boolean(preview) },
+    { label: mode === "photo" || mode === "harvest" ? "Log" : "AI", done: Boolean(result) || mode === "photo" || mode === "harvest" },
+    { label: "Kort", done: Boolean(selectedZone || pos) },
+    { label: "Handling", done: Boolean(result) && (mode === "diagnosis" || mode === "growth" || mode === "bed_scan") },
+  ];
 
   const previousPlantObservations = useMemo(() => {
     if (!selectedPlant) return [];
@@ -365,21 +371,37 @@ export default function GardenCamera({ userId, garden, zones, plants, observatio
           ))}
         </div>
 
+        <div className="companion-scan-route" aria-label="Scan workflow">
+          {scanRoute.map((step, index) => (
+            <div key={step.label} className={step.done ? "done" : ""}>
+              <span>{index + 1}</span>
+              <strong>{step.label}</strong>
+            </div>
+          ))}
+        </div>
+
         <div className="companion-camera-grid">
           <div>
             {!preview ? (
               <div className="companion-upload">
                 <Camera size={34} />
                 <h3>Start med et billede</h3>
-                <p>Kameraet er den hurtigste måde at tilføje planter, sygdomme, vækst og høst til kortet.</p>
+                <p>{modeMeta.hint}</p>
                 <div className="companion-upload-actions">
                   <Button onClick={() => camRef.current?.click()}><Camera size={15} className="mr-1.5" /> Tag foto</Button>
                   <Button variant="outline" onClick={() => fileRef.current?.click()}><Upload size={15} className="mr-1.5" /> Upload</Button>
                 </div>
+                {mode === "growth" && (
+                  <div className="companion-ghost-guide">
+                    <span />
+                    Samme vinkel giver bedre væksttrend.
+                  </div>
+                )}
               </div>
             ) : (
               <div className="companion-preview">
                 <img src={preview} alt="Scan" />
+                {mode === "growth" && <div className="companion-preview-ghost" aria-hidden />}
                 <button onClick={() => { setFile(null); setPreview(null); setResult(null); }} aria-label="Fjern billede">
                   <X size={15} />
                 </button>
