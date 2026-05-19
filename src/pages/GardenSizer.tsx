@@ -1036,7 +1036,7 @@ export default function GardenSizer() {
     <>
       <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}`}</style>
       <AppNav active="sizer" />
-      <div className="container">
+      <div className={`container havemaaler-page ${step === 2 ? "is-measuring" : "is-addressing"}`}>
         <header className="page-head">
           <div className="eyebrow" style={{ marginBottom: 14 }}>Værktøj · Havemåler</div>
           <h1>Tegn din græsplæne. Få den rette robotklipper.</h1>
@@ -1131,8 +1131,8 @@ export default function GardenSizer() {
                   <span>{chosen.name.split(",").slice(1).join(",").toUpperCase()}</span>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <div style={{ display: "flex", gap: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
+              <div className="topview-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div className="imagery-toggle" style={{ display: "flex", gap: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
                   <button onClick={() => ortoCfg && setImagery("ortofoto")} disabled={!ortoCfg} style={{ padding: "6px 10px", background: imagery === "ortofoto" ? "var(--gold)" : "transparent", color: imagery === "ortofoto" ? "#14271d" : "inherit", border: 0, opacity: ortoCfg ? 1 : 0.45 }}>Ortofoto 12cm</button>
                   <button onClick={() => setImagery("mapbox")} style={{ padding: "6px 10px", background: imagery === "mapbox" ? "var(--gold)" : "transparent", color: imagery === "mapbox" ? "#14271d" : "inherit", border: 0 }}>Mapbox</button>
                 </div>
@@ -1173,8 +1173,8 @@ export default function GardenSizer() {
 	                  )}
 
                     {mode === "wand" && wandPreview && (
-                      <div style={{ position: "absolute", left: 16, right: 16, bottom: 76, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-                        <div style={{ pointerEvents: "auto", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "center", maxWidth: "calc(100% - 24px)", background: "rgba(12,26,19,0.78)", border: "1px solid rgba(237,207,149,0.42)", color: "var(--mist-25)", borderRadius: 12, padding: "8px 10px", backdropFilter: "blur(12px)", boxShadow: "var(--sh-2)" }}>
+                      <div className="wand-review-bar" style={{ position: "absolute", left: 16, right: 16, bottom: 76, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+                        <div className="wand-review-panel" style={{ pointerEvents: "auto", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "center", maxWidth: "calc(100% - 24px)", background: "rgba(12,26,19,0.78)", border: "1px solid rgba(237,207,149,0.42)", color: "var(--mist-25)", borderRadius: 12, padding: "8px 10px", backdropFilter: "blur(12px)", boxShadow: "var(--sh-2)" }}>
                           <span style={{ fontSize: 11, color: "var(--gold)", fontFamily: "JetBrains Mono, monospace", marginRight: 4 }}>
                             {Math.round(wandPreview.confidence * 100)}% {wandPreview.needsReview ? "TJEK" : "KLAR"}
                           </span>
@@ -1199,7 +1199,7 @@ export default function GardenSizer() {
 	                    )}
 	                  </div>
 
-                  <div className="tools" style={{ zIndex: 2, flexWrap: "wrap" }}>
+                  <div className="tools measurement-tools" style={{ zIndex: 2, flexWrap: "wrap" }}>
 	                    <button className={`tool-btn ${mode === "draw" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("draw"); }} title="Tegn (1)">Tegn</button>
 	                    <button className={`tool-btn ${mode === "edit" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("edit"); }} disabled={!main.length} title="Rediger (2)">Rediger</button>
 	                    <button className={`tool-btn ${mode === "exclude" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("exclude"); }} disabled={!mainClosed} title="Udeluk (3)">− Udeluk</button>
@@ -1217,7 +1217,7 @@ export default function GardenSizer() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                <div className="map-secondary-actions" style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                   <button className="tool-btn" onClick={() => loadMatrikel()}>Hent matrikel</button>
                   {matrikel && <button className="tool-btn" onClick={useMatrikelAsBase}>Brug matrikel som plæne</button>}
                   <button className="tool-btn" onClick={() => {
@@ -1236,7 +1236,7 @@ export default function GardenSizer() {
                   }}>📍 Find mig</button>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginTop: 24 }}>
+                <div className="sizer-stats" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginTop: 24 }}>
                   <div className="acct-stat"><div className="v">{main.length}</div><div className="l">Hjørner</div></div>
                   <div className="acct-stat"><div className="v">{perim.toFixed(0)} m</div><div className="l">Omkreds</div></div>
                   <div className="acct-stat"><div className="v">{area > 0 ? Math.ceil(area / 8) + " min" : "— min"}</div><div className="l">Estimeret klippetid</div></div>

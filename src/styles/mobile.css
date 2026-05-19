@@ -236,41 +236,278 @@
 
 /* ---------- Garden sizer ---------- */
 @media (max-width: 1000px) {
-  .sizer-layout { gap: 16px; padding-bottom: 80px; }
-  .canvas-host { aspect-ratio: 4 / 5; border-radius: var(--r-md); }
-  .canvas-host.topview { aspect-ratio: 4 / 5; }
+  .sizer-layout {
+    gap: 18px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  }
+  .canvas-host {
+    aspect-ratio: auto;
+    height: clamp(520px, 72dvh, 680px);
+    min-height: 520px;
+    border-radius: var(--r-md);
+  }
+  .canvas-host.topview { aspect-ratio: auto; }
+  .canvas-host .mapboxgl-ctrl-top-right { display: none; }
+  .canvas-host .mapboxgl-ctrl-bottom-right,
+  .canvas-host .mapboxgl-ctrl-bottom-left {
+    bottom: 78px;
+  }
   .canvas-host .help {
-    top: 10px; left: 10px; right: 10px;
+    top: 12px;
+    left: 12px;
+    right: auto;
+    max-width: min(64%, 440px);
+    align-items: flex-start;
+    border-radius: 14px;
+    padding: 9px 12px;
     font-size: 11px;
-    padding: 7px 12px;
+    line-height: 1.28;
+    box-shadow: 0 12px 28px -18px rgba(0, 0, 0, 0.55);
   }
   .canvas-host .area-pill {
-    top: 10px; right: 10px;
-    padding: 8px 12px;
+    top: 12px;
+    right: 12px;
+    max-width: 34%;
+    border-radius: 14px;
+    padding: 8px 11px;
     font-size: 18px;
+    line-height: 1.05;
+    text-align: right;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .canvas-host .area-pill .lbl {
+    font-size: 9px;
+    letter-spacing: 0.1em;
   }
   .canvas-host .tools {
+    left: 10px;
+    right: 10px;
     bottom: 10px;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: calc(100% - 20px);
+    transform: none;
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    border-radius: 18px;
+    padding: 7px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
-  .canvas-host .tool-btn { padding: 7px 11px; font-size: 11px; }
-  .recommendation { position: static; padding: 22px; }
+  .canvas-host .tools::-webkit-scrollbar { display: none; }
+  .canvas-host .tool-btn {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 0 13px;
+    font-size: 12px;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .canvas-host .tool-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .wand-review-bar {
+    left: 10px !important;
+    right: 10px !important;
+    bottom: 74px !important;
+  }
+  .wand-review-panel {
+    max-width: 100% !important;
+    justify-content: flex-start !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    border-radius: 18px !important;
+    padding: 8px !important;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wand-review-panel::-webkit-scrollbar { display: none; }
+  .wand-review-panel .tool-btn {
+    min-height: 38px;
+    padding: 0 12px;
+  }
+  .map-secondary-actions {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .map-secondary-actions::-webkit-scrollbar { display: none; }
+  .map-secondary-actions .tool-btn {
+    flex: 0 0 auto;
+    min-height: 42px;
+    padding: 0 14px;
+    border: 1px solid rgba(20, 39, 29, 0.12);
+    border-radius: var(--r-pill);
+    background: var(--paper);
+    color: var(--forest-800);
+    box-shadow: var(--sh-1);
+    font-size: 13px;
+    font-weight: 500;
+    touch-action: manipulation;
+  }
+  .sizer-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    margin-top: 16px !important;
+  }
+  .sizer-stats .acct-stat {
+    padding: 14px 10px;
+    border-radius: var(--r-md);
+  }
+  .sizer-stats .acct-stat .v {
+    font-size: 22px;
+    line-height: 1.05;
+  }
+  .sizer-stats .acct-stat .l {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .recommendation {
+    position: static;
+    padding: 20px;
+    border-radius: var(--r-md);
+  }
+  .rec-mower {
+    margin-bottom: 18px;
+    padding: 22px;
+    border-radius: var(--r-md);
+  }
+  .rec-mower h3 { font-size: 24px; }
+  .rec-mower .price { font-size: 25px; }
+  .rec-meta {
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .rec-meta .cell {
+    padding: 11px 12px;
+    border-radius: var(--r-sm);
+  }
+  .rec-meta .cell .v { font-size: 20px; }
 }
 
 @media (max-width: 720px) {
-  .addr-step { gap: 20px; }
-  .addr-form { padding: 4px 4px 4px 14px; }
-  .addr-form input { font-size: 14px; padding: 10px 0; }
-  .addr-form > button { height: 40px; padding: 0 14px; font-size: 12px; }
+  .havemaaler-page.is-measuring {
+    --hm-edge: 18px;
+  }
+  .havemaaler-page.is-measuring .page-head {
+    display: none;
+  }
+  .addr-step {
+    gap: 20px;
+    padding-bottom: 18px;
+  }
+  .addr-step h2 {
+    font-size: clamp(32px, 10vw, 42px);
+  }
+  .addr-lede {
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  .addr-form {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 10px;
+    border-radius: 18px;
+    padding: 12px;
+  }
+  .addr-form .pin {
+    margin-top: 13px;
+  }
+  .addr-form input {
+    min-width: 0;
+    flex: 1 1 calc(100% - 34px);
+    font-size: 16px;
+    padding: 10px 0;
+  }
+  .addr-form > button {
+    flex: 1 0 100%;
+    height: 48px;
+    justify-content: center;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .addr-suggest {
+    max-height: min(320px, 52vh);
+    border-radius: 16px;
+  }
+  .addr-suggest button {
+    min-height: 46px;
+    padding: 11px 12px;
+  }
   .addr-meta { gap: 12px; flex-wrap: wrap; font-size: 10px; }
   .addr-preview { aspect-ratio: 4 / 3; }
 
-  .topview-header { padding-bottom: 16px; gap: 10px; }
+  .topview-header {
+    position: sticky;
+    top: 58px;
+    z-index: 40;
+    margin-inline: calc(var(--hm-edge, 18px) * -1);
+    padding: 10px var(--hm-edge, 18px) 12px;
+    gap: 10px;
+    background: rgba(251, 250, 245, 0.94);
+    -webkit-backdrop-filter: saturate(150%) blur(14px);
+    backdrop-filter: saturate(150%) blur(14px);
+    border-bottom: 1px solid rgba(20, 39, 29, 0.08);
+  }
+  .addr-display {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .addr-display .txt {
+    min-width: 0;
+  }
   .addr-display .txt strong { font-size: 16px; }
+  .addr-display .txt strong,
+  .addr-display .txt span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .pin-badge { width: 34px; height: 34px; flex: 0 0 34px; }
-  .change-addr { padding: 7px 12px; font-size: 12px; }
+  .topview-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .imagery-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .imagery-toggle button {
+    flex: 1 1 0;
+    min-height: 40px;
+    padding: 0 8px !important;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .change-addr {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .canvas-host.topview {
+    width: calc(100% + (var(--hm-edge, 18px) * 2));
+    height: clamp(520px, 73dvh, 640px);
+    min-height: 520px;
+    margin-inline: calc(var(--hm-edge, 18px) * -1);
+    border-radius: 0;
+  }
+  .canvas-host .help {
+    max-width: calc(100% - 130px);
+  }
+  .canvas-host .area-pill {
+    max-width: 118px;
+  }
+  .recommendation .btn {
+    width: 100%;
+    min-height: 48px;
+    white-space: normal;
+    text-align: center;
+  }
 }
 
 /* ---------- Watering plan ---------- */
