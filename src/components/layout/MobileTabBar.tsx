@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { PawPrint } from "lucide-react";
 import { useCart } from "@/lib/cart";
 import { useCommandPalette } from "@/components/CommandPalette";
 
@@ -49,6 +50,12 @@ const items = [
         <path d="M5 21h14" />
       </svg>
     ),
+  },
+  {
+    to: "/dyreliv",
+    key: "wildlife",
+    label: "Dyreliv",
+    icon: <PawPrint size={22} strokeWidth={1.7} />,
   },
   {
     to: "/cart",

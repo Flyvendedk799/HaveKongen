@@ -72,6 +72,7 @@ export function SiteNav({ onDark = true }: { onDark?: boolean }) {
         <Link to="/webshop">Webshop</Link>
         <Link to="/havemaaler">Havemåler</Link>
         <Link to="/havekompagnon">Havekompagnon</Link>
+        <Link to="/dyreliv">Dyreliv</Link>
         <Link to="/ai">Plantepleje AI</Link>
       </div>
       <div className="nav-actions">
@@ -105,6 +106,7 @@ export function AppNav({ active }: { active?: string }) {
         {link("/webshop", "Webshop", "shop")}
         {link("/havemaaler", "Havemåler", "sizer")}
         {link("/havekompagnon", "Havekompagnon", "companion")}
+        {link("/dyreliv", "Dyreliv", "wildlife")}
         {link("/ai", "Plantepleje AI", "ai")}
       </div>
       <div className="nav-actions">
@@ -147,6 +149,7 @@ export function SiteFooter() {
             <ul>
               <li><Link to="/havemaaler">Havemåler</Link></li>
               <li><Link to="/havekompagnon">Havekompagnon</Link></li>
+              <li><Link to="/dyreliv">Dyreliv</Link></li>
               <li><Link to="/ai">Plantepleje AI</Link></li>
             </ul>
           </div>

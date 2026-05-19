@@ -1524,6 +1524,46 @@
   gap: 18px;
 }
 
+.wildlife-page-head {
+  align-items: end;
+}
+
+.wildlife-page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wildlife-garden-switch {
+  justify-content: flex-start;
+}
+
+.wildlife-page-kpis {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.wildlife-page-kpis span,
+.wildlife-page-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 39, 29, .08);
+  background: rgba(255, 255, 255, .74);
+  color: var(--ink-600);
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.wildlife-page-link {
+  color: var(--forest-800);
+}
+
 .wildlife-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
@@ -2011,11 +2051,16 @@
 
   .companion-hero,
   .companion-camera-grid,
+  .wildlife-page-head,
   .wildlife-hero,
   .wildlife-two-col,
   .wildlife-control-panel,
   .wildlife-zone-card--featured {
     grid-template-columns: 1fr;
+  }
+
+  .wildlife-page-actions {
+    justify-content: flex-start;
   }
 
   .companion-experience-rail,

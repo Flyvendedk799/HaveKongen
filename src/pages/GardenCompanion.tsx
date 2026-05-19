@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BarChart3, Bot, CalendarDays, Camera, CheckCircle2, CloudSun, Droplets, Footprints, Gauge, Leaf, MapPin, NotebookPen, PawPrint, PlugZap, Radio, ShieldCheck, Sprout, Users, XCircle } from "lucide-react";
+import { BarChart3, Bot, CalendarDays, Camera, CheckCircle2, CloudSun, Droplets, Footprints, Gauge, Leaf, MapPin, NotebookPen, PlugZap, Radio, ShieldCheck, Sprout, Users, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,6 @@ import GardenRound from "@/components/companion/GardenRound";
 import PlantTimeline from "@/components/companion/PlantTimeline";
 import GardenCoach from "@/components/companion/GardenCoach";
 import SeasonPlan from "@/components/companion/SeasonPlan";
-import WildlifeTab from "@/components/companion/WildlifeTab";
 import MorningBriefing from "@/components/watering/MorningBriefing";
 import CalendarTimeline from "@/components/watering/CalendarTimeline";
 import JournalTab from "@/components/watering/JournalTab";
@@ -81,7 +80,6 @@ const PRIMARY: { key: View; label: string }[] = [
 const SECONDARY: { key: View; label: string; icon: React.ElementType }[] = [
   { key: "plants", label: "Planter", icon: Sprout },
   { key: "water", label: "Vanding", icon: Droplets },
-  { key: "wildlife", label: "Dyreliv", icon: PawPrint },
   { key: "journal", label: "Dagbog", icon: NotebookPen },
   { key: "devices", label: "Smart have", icon: Radio },
   { key: "coach", label: "Coach", icon: Bot },
@@ -116,6 +114,11 @@ function readCompanionHandoff(): CompanionHandoff | null {
   } catch {
     return null;
   }
+}
+
+function readStoredView(): View {
+  const raw = localStorage.getItem("companion.view");
+  return raw && VIEW_KEYS.has(raw as View) ? raw as View : "today";
 }
 
 function priorityOf(value: string | null): CareAction["priority"] {
@@ -202,7 +205,7 @@ export default function GardenCompanion() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { activeGardenId, setActive } = useActiveGarden();
-  const [view, setView] = useState<View>(() => (localStorage.getItem("companion.view") as View) || "today");
+  const [view, setView] = useState<View>(readStoredView);
   const [loading, setLoading] = useState(true);
   const [gardens, setGardens] = useState<Garden[]>([]);
   const [garden, setGarden] = useState<Garden | null>(null);
@@ -801,7 +804,6 @@ export default function GardenCompanion() {
               onSnooze={() => toast.success("Vanding sprunget over for denne visning")}
             />
           )}
-          {view === "wildlife" && <WildlifeTab zones={zones} plantsByZone={plantsByZone} />}
           {view === "journal" && <JournalTab gardenId={garden.id} zones={zones} plantsByZone={plantsByZone} />}
           {view === "devices" && (
             <>

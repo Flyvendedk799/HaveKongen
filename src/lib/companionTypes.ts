@@ -7,7 +7,6 @@ export type CompanionView =
   | "plan"
   | "plants"
   | "water"
-  | "wildlife"
   | "journal"
   | "devices"
   | "insights";
