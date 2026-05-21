@@ -1,20 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { PawPrint } from "lucide-react";
+import { PawPrint, Sprout } from "lucide-react";
 import { useCart } from "@/lib/cart";
 import { useCommandPalette } from "@/components/CommandPalette";
 
 const items = [
   {
-    to: "/",
-    key: "home",
-    label: "Hjem",
-    icon: (
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 11l9-8 9 8" />
-        <path d="M5 10v10h14V10" />
-      </svg>
-    ),
+    to: "/min-have",
+    key: "hub",
+    label: "Min have",
+    icon: <Sprout size={22} strokeWidth={1.7} />,
   },
   {
     to: "/webshop",
