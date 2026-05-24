@@ -25,6 +25,16 @@ import {
 } from "@/lib/lawnSegmentation";
 import { logHavemaalerSegmentationEvent } from "@/lib/lawnSegmentation/telemetry";
 import PinpointSequence from "@/components/havemaaler/PinpointSequence";
+import GardenTwinViewer from "@/components/havemaaler/GardenTwinViewer";
+import GardenScanPanel from "@/components/havemaaler/GardenScanPanel";
+import {
+  coerceGardenDepthModel,
+  depthModelToJson,
+  generateGardenDepthModel,
+  type GardenDepthModel,
+} from "@/lib/gardenDepth";
+import { isTerminalScanStatus, scanCanStartNewSession, webGardenScanUrl } from "@/lib/gardenScan";
+import type { GardenScanSession, ScanUploadTarget } from "@/lib/gardenScan";
 
 type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" | "mapbox" };
 type LngLat = [number, number];
@@ -34,8 +44,9 @@ type WandOp = "replace" | "add" | "subtract";
 type WandReviewMode = "none" | "add" | "remove";
 type WandStage = "idle" | "Henter billede" | "Finder græs" | "Tegner kant" | "Klar til tjek";
 type Imagery = "ortofoto" | "mapbox";
+type MapView = "map" | "twin";
 type EditableRingId = "main" | `lawn:${number}` | `excl:${number}`;
-type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "polygon" | "exclusions" | "imagery_source" | "thumbnail_url">;
+type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "polygon" | "exclusions" | "imagery_source" | "thumbnail_url" | "depth_model" | "depth_model_updated_at">;
 type SavedLawnZone = Pick<Tables<"garden_zones">, "id" | "polygon">;
 
 const AUTOSAVE_KEY = "havemaaler:draft:v2";
@@ -161,6 +172,7 @@ export default function GardenSizer() {
 
   const [imagery, setImagery] = useState<Imagery>("ortofoto");
   const [mode, setMode] = useState<Mode>("draw");
+  const [mapView, setMapView] = useState<MapView>("map");
 
   // Polygon state
   const [main, setMain] = useState<Ring>([]);
@@ -186,6 +198,10 @@ export default function GardenSizer() {
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [snapIndicator, setSnapIndicator] = useState<LngLat | null>(null);
   const [saving, setSaving] = useState(false);
+  const [startingScan, setStartingScan] = useState(false);
+  const [savedDepthModel, setSavedDepthModel] = useState<GardenDepthModel | null>(null);
+  const [scanLaunch, setScanLaunch] = useState<{ sessionId: string; scanUrl: string; uploadPrefix?: string | null; uploadTargets?: ScanUploadTarget[] } | null>(null);
+  const [scanSessions, setScanSessions] = useState<GardenScanSession[]>([]);
   const [pinpointing, setPinpointing] = useState<{ name: string; center: LngLat } | null>(null);
   const [loadingSavedGarden, setLoadingSavedGarden] = useState(Boolean(gardenIdParam));
   const [editingGarden, setEditingGarden] = useState<SavedGarden | null>(null);
@@ -270,6 +286,9 @@ export default function GardenSizer() {
     setMain([]); setMainClosed(false); setAdditionalLawns([]); setCurrentLawn([]); setExclusions([]); setCurrentExclusion([]);
     clearWandPreview();
     setMatrikel(null);
+    setSavedDepthModel(null);
+    setScanLaunch(null);
+    setMapView("map");
     // Trigger cinematic pinpoint; finalises into step 2 in onDone
     setPinpointing({ name: s.place_name, center: s.center });
   }
@@ -753,6 +772,18 @@ export default function GardenSizer() {
   }, [completedLawns, exclusions]);
 
   const tier = TIERS.find((t) => area <= t.max) ?? TIERS[TIERS.length - 1];
+  const generatedDepthModel = useMemo(() => generateGardenDepthModel({
+    gardenId: editingGarden?.id ?? null,
+    name: chosen?.name ?? editingGarden?.name ?? "Min have",
+    center: chosen?.center ?? null,
+    lawnRings: completedLawns,
+    exclusions,
+    matrikel,
+    areaM2: area > 0 ? Math.round(area) : null,
+  }), [area, chosen?.center, chosen?.name, completedLawns, editingGarden?.id, editingGarden?.name, exclusions, matrikel]);
+  const activeDepthModel = savedDepthModel ?? generatedDepthModel;
+  const depthObjectCount = activeDepthModel?.objects.length ?? 0;
+  const canStartNewScan = scanCanStartNewSession(scanSessions);
 
   // ----- History (undo/redo) -----
   type Snap2 = { main: Ring; mainClosed: boolean; additionalLawns: Ring[]; currentLawn: Ring; exclusions: Ring[] };
@@ -790,7 +821,111 @@ export default function GardenSizer() {
   function clear() {
     setMain([]); setMainClosed(false); setAdditionalLawns([]); setCurrentLawn([]); setExclusions([]); setCurrentExclusion([]);
     setWandConfidence(null); setWandBbox(null); clearWandPreview();
+    setSavedDepthModel(null); setScanLaunch(null); setScanSessions([]); setMapView("map");
   }
+
+  function refreshDepthPreview() {
+    if (!generatedDepthModel) {
+      toast("Tegn eller hent en græsflade først");
+      return;
+    }
+    setSavedDepthModel(generatedDepthModel);
+    setMapView("twin");
+    toast.success("3D-forhåndsvisning opdateret", {
+      description: "Satellitmodellen er klar. Mobilscan gør objekter og højder mere præcise.",
+    });
+  }
+
+  async function loadScanSessions(gardenId = editingGarden?.id) {
+    if (!gardenId || !user) {
+      setScanSessions([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("garden_scan_sessions")
+      .select("*")
+      .eq("garden_id", gardenId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    if (!error) setScanSessions((data ?? []) as GardenScanSession[]);
+  }
+
+  async function startGardenScan() {
+    if (!user) {
+      toast("Log ind for at starte mobilscan");
+      navigate("/login?redirect=/havemaaler");
+      return;
+    }
+    if (!editingGarden?.id) {
+      toast("Gem haven før mobilscan", {
+        description: "Scanningen skal kobles til en gemt have, så browserdata kan alignes med satellitkortet.",
+      });
+      return;
+    }
+    if (!generatedDepthModel) {
+      toast("Haven mangler en lukket græsflade");
+      return;
+    }
+    const activeSession = scanSessions.find((session) => !isTerminalScanStatus(session.status));
+    if (activeSession) {
+      const scanUrl = webGardenScanUrl(editingGarden.id, activeSession.id);
+      setScanLaunch({
+        sessionId: activeSession.id,
+        scanUrl,
+        uploadPrefix: activeSession.upload_prefix,
+      });
+      toast("Fortsæt eksisterende 3D-scan", {
+        description: "Der er allerede en aktiv pipeline-session. Brug den, så worker og upload ikke får dubletter.",
+        action: { label: "Åbn", onClick: () => { navigate(scanUrl); } },
+        duration: 7000,
+      });
+      return;
+    }
+    setStartingScan(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create-garden-scan-session", {
+        body: {
+          garden_id: editingGarden.id,
+          source: "havemaaler",
+          capture_client_version: "mobile-web-v1",
+          capture_metadata: {
+            depth_model_version: generatedDepthModel.version,
+            alignment_mode: "scan-anchored",
+            capture_surface: "mobile_web",
+          },
+        },
+      });
+      if (error) throw error;
+      const sessionId = String(data?.session?.id ?? "");
+      if (!sessionId) throw new Error("Scan-session manglede id");
+      const scanUrl = String(data?.scan_url || data?.mobile_web_url || webGardenScanUrl(editingGarden.id, sessionId));
+      setScanLaunch({
+        sessionId,
+        scanUrl,
+        uploadPrefix: typeof data?.upload_prefix === "string" ? data.upload_prefix : null,
+        uploadTargets: Array.isArray(data?.upload_targets) ? data.upload_targets as ScanUploadTarget[] : undefined,
+      });
+      setScanSessions((prev) => data?.session ? [data.session as GardenScanSession, ...prev.filter((row) => row.id !== sessionId)] : prev);
+      toast.success("Mobilscan er klar", {
+        description: "Åbn kamera-flowet i browseren og brug 2-4 tydelige ankre.",
+        action: { label: "Åbn", onClick: () => { navigate(scanUrl); } },
+        duration: 7000,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kunne ikke starte 3D-scan");
+    } finally {
+      setStartingScan(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!editingGarden?.id || !user) return;
+    void loadScanSessions(editingGarden.id);
+    const t = window.setInterval(() => { void loadScanSessions(editingGarden.id); }, 15000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingGarden?.id, user?.id]);
 
   function clearWandPreview() {
     setWandPreview(null);
@@ -1157,7 +1292,7 @@ export default function GardenSizer() {
       const [{ data: gardenData, error: gardenError }, { data: zoneRows, error: zoneError }] = await Promise.all([
         supabase
           .from("gardens")
-          .select("id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url")
+          .select("id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url, depth_model, depth_model_updated_at")
           .eq("id", gardenIdParam)
           .eq("user_id", user.id)
           .maybeSingle(),
@@ -1203,9 +1338,12 @@ export default function GardenSizer() {
       setExclusions(exclusionRingsFromJson(savedGarden.exclusions));
       setCurrentExclusion([]);
       setMatrikel(null);
+      setSavedDepthModel(coerceGardenDepthModel(savedGarden.depth_model));
+      setScanLaunch(null);
       clearWandPreview();
       setImagery(savedGarden.imagery_source === "mapbox" ? "mapbox" : "ortofoto");
       setMode("edit");
+      setMapView("map");
       setStep(2);
       historyRef.current = { past: [], future: [] };
       toast.success("Måling hentet til redigering");
@@ -1294,6 +1432,14 @@ export default function GardenSizer() {
     const gardenPolygon = completedLawns.length === 1
       ? polygonForRing(completedLawns[0])
       : { type: "MultiPolygon", coordinates: completedLawns.map((ring) => [[...ring, ring[0]]]) };
+    const depthModelForSave = generatedDepthModel
+      ? {
+        ...generatedDepthModel,
+        gardenId: editingGarden?.id ?? generatedDepthModel.gardenId ?? null,
+        name: chosen.name.split(",")[0],
+        generatedAt: new Date().toISOString(),
+      }
+      : null;
 
     const gardenPayload = {
       name: chosen.name.split(",")[0],
@@ -1305,6 +1451,8 @@ export default function GardenSizer() {
       exclusions: exclusions.map(r => ({ type: "Polygon", coordinates: [[...r, r[0]]] })),
       imagery_source: imagery,
       thumbnail_url,
+      depth_model: depthModelForSave ? depthModelToJson(depthModelForSave) : null,
+      depth_model_updated_at: depthModelForSave ? new Date().toISOString() : null,
     };
 
     const { data: g, error } = editingGarden
@@ -1320,6 +1468,16 @@ export default function GardenSizer() {
         ...gardenPayload,
       }).select().single();
     if (error || !g) { toast.error("Kunne ikke gemme have"); setSaving(false); return; }
+    if (!editingGarden && depthModelForSave) {
+      const depthModelWithGardenId = { ...depthModelForSave, gardenId: g.id };
+      await supabase.from("gardens").update({
+        depth_model: depthModelToJson(depthModelWithGardenId),
+        depth_model_updated_at: new Date().toISOString(),
+      }).eq("id", g.id).eq("user_id", user.id);
+      setSavedDepthModel(depthModelWithGardenId);
+    } else {
+      setSavedDepthModel(depthModelForSave);
+    }
     const zoneError = await syncLawnZones(g.id, Boolean(editingGarden));
     if (zoneError) { toast.error("Have gemt, men zonerne kunne ikke gemmes"); setSaving(false); return; }
     setActive(g.id);
@@ -1449,6 +1607,10 @@ export default function GardenSizer() {
               </div>
               <div className="topview-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div className="imagery-toggle" style={{ display: "flex", gap: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
+                  <button onClick={() => setMapView("map")} style={{ padding: "6px 10px", background: mapView === "map" ? "var(--gold)" : "transparent", color: mapView === "map" ? "#14271d" : "inherit", border: 0 }}>2D kort</button>
+                  <button onClick={() => { if (!activeDepthModel) refreshDepthPreview(); else setMapView("twin"); }} disabled={!generatedDepthModel} style={{ padding: "6px 10px", background: mapView === "twin" ? "var(--gold)" : "transparent", color: mapView === "twin" ? "#14271d" : "inherit", border: 0, opacity: generatedDepthModel ? 1 : 0.45 }}>3D twin</button>
+                </div>
+                <div className="imagery-toggle" style={{ display: "flex", gap: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
                   <button onClick={() => ortoCfg && setImagery("ortofoto")} disabled={!ortoCfg} style={{ padding: "6px 10px", background: imagery === "ortofoto" ? "var(--gold)" : "transparent", color: imagery === "ortofoto" ? "#14271d" : "inherit", border: 0, opacity: ortoCfg ? 1 : 0.45 }}>Ortofoto 12cm</button>
                   <button onClick={() => setImagery("mapbox")} style={{ padding: "6px 10px", background: imagery === "mapbox" ? "var(--gold)" : "transparent", color: imagery === "mapbox" ? "#14271d" : "inherit", border: 0 }}>Mapbox</button>
                 </div>
@@ -1462,11 +1624,15 @@ export default function GardenSizer() {
             <div className="sizer-layout">
               <div>
                 <div className="canvas-host topview" style={{ position: "relative" }}>
-                  <div ref={containerRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0, borderRadius: "inherit" }} />
+                  <div ref={containerRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0, borderRadius: "inherit", opacity: mapView === "map" ? 1 : 0, pointerEvents: mapView === "map" ? "auto" : "none" }} />
+                  {mapView === "twin" && (
+                    <GardenTwinViewer model={activeDepthModel} className="garden-twin-map-overlay" />
+                  )}
                   <div className="help" style={{ zIndex: 2 }}>
                     <span className="dot"></span>
                     <span>
-                      {mode === "wand" ? (wandLoading ? wandStage : wandPreview ? (
+                      {mapView === "twin" ? "3D Garden Twin viser satellitbaserede estimater. Mobilscan låser objekter, højder og ukendte områder bedre."
+                        : mode === "wand" ? (wandLoading ? wandStage : wandPreview ? (
                           wandReviewMode === "add" ? "Klik på græs der mangler"
                             : wandReviewMode === "remove" ? "Klik på område der skal væk"
                             : "Tjek kanten. Godkend, forfin eller skift til manuel redigering."
@@ -1513,8 +1679,9 @@ export default function GardenSizer() {
 	                        AI {Math.round(wandConfidence * 100)}% sikker{wandPreview?.needsReview ? " · tjek kant" : ""}
 	                      </div>
 	                    )}
-	                  </div>
+                  </div>
 
+                  {mapView === "map" && (
                   <div className="tools measurement-tools" style={{ zIndex: 2, flexWrap: "wrap" }}>
 	                    <button className={`tool-btn ${mode === "draw" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("draw"); }} title="Tegn græszone (1)">{mainClosed ? "+ Græszone" : "Tegn"}</button>
 	                    <button className={`tool-btn ${mode === "edit" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("edit"); }} disabled={!main.length} title="Rediger (2)">Rediger</button>
@@ -1532,11 +1699,19 @@ export default function GardenSizer() {
                     <button className={`tool-btn ${snapEnabled ? "is-active" : ""}`} onClick={() => setSnapEnabled(v => !v)} title="Snap (S)">Snap</button>
                     <button className="tool-btn" onClick={clear} title="Ryd alt">Ryd</button>
                   </div>
+                  )}
                 </div>
 
                 <div className="map-secondary-actions" style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                   <button className="tool-btn" onClick={() => loadMatrikel()}>Hent matrikel</button>
                   {matrikel && <button className="tool-btn" onClick={useMatrikelAsBase}>Brug matrikel som plæne</button>}
+                  <button className="tool-btn" onClick={refreshDepthPreview} disabled={!generatedDepthModel}>Byg 3D preview</button>
+                  <button className="tool-btn" onClick={startGardenScan} disabled={startingScan || !generatedDepthModel}>
+                    {startingScan ? "Klargør scan…" : canStartNewScan ? "Scan haven i 3D" : "Fortsæt 3D-scan"}
+                  </button>
+                  {scanLaunch && (
+                    <a className="tool-btn" href={scanLaunch.scanUrl}>Åbn mobilscan</a>
+                  )}
                   <button className="tool-btn" onClick={() => {
                     if (!navigator.geolocation) { toast("Geolocation ikke tilgængelig"); return; }
                     navigator.geolocation.getCurrentPosition(
@@ -1557,6 +1732,7 @@ export default function GardenSizer() {
                   <div className="acct-stat"><div className="v">{lawnZoneCount}</div><div className="l">Græszoner</div></div>
                   <div className="acct-stat"><div className="v">{totalLawnCorners}</div><div className="l">Hjørner</div></div>
                   <div className="acct-stat"><div className="v">{perim.toFixed(0)} m</div><div className="l">Omkreds</div></div>
+                  <div className="acct-stat"><div className="v">{depthObjectCount}</div><div className="l">3D objekter</div></div>
                   <div className="acct-stat"><div className="v">{area > 0 ? Math.ceil(area / 8) + " min" : "— min"}</div><div className="l">Estimeret klippetid</div></div>
                 </div>
               </div>
@@ -1576,6 +1752,18 @@ export default function GardenSizer() {
                   <div className="cell"><div className="v">{tier.battery}</div><div className="l">Batteritid</div></div>
                   <div className="cell"><div className="v">{tier.noise}</div><div className="l">Lydniveau</div></div>
                 </div>
+
+                <GardenScanPanel
+                  depthModel={activeDepthModel}
+                  sessions={scanSessions}
+                  scanLaunch={scanLaunch}
+                  starting={startingScan}
+                  canPreview={Boolean(generatedDepthModel)}
+                  canStartScan={Boolean(editingGarden?.id && generatedDepthModel)}
+                  onBuildPreview={refreshDepthPreview}
+                  onStartScan={startGardenScan}
+                  onShowTwin={() => { if (!activeDepthModel) refreshDepthPreview(); else setMapView("twin"); }}
+                />
 
                 <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={saveGarden} disabled={saving || area === 0}>
                   {saving ? (editingGarden ? "Opdaterer…" : "Gemmer…") : editingGarden ? "Opdater måling" : "Gem have og fortsæt"}

@@ -80,12 +80,17 @@ const items = [
 export function MobileTabBar() {
   const { pathname } = useLocation();
   const isHome = pathname === "/";
+  const isImmersive = pathname.startsWith("/havemaaler/scan");
   const [visible, setVisible] = useState(!isHome);
   const cartCount = useCart((s) => s.count());
   const openCart = useCart((s) => s.openCart);
   const openPalette = useCommandPalette((s) => s.open);
 
   useEffect(() => {
+    if (isImmersive) {
+      setVisible(false);
+      return;
+    }
     if (!isHome) {
       setVisible(true);
       return;
@@ -103,7 +108,7 @@ export function MobileTabBar() {
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, [isHome, pathname]);
+  }, [isHome, isImmersive, pathname]);
 
   const isActive = (to: string) =>
     to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(to + "/");

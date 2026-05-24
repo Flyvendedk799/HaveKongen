@@ -2,8 +2,10 @@ import { useMemo, useRef, useState } from "react";
 import { Camera, Droplets, Leaf, MapPin, Move, Radio, Sprout } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { clampNormalizedPoint, type HealthScore, type ZoneInsight } from "@/lib/companionTypes";
+import { coerceGardenDepthModel } from "@/lib/gardenDepth";
+import GardenTwinViewer from "@/components/havemaaler/GardenTwinViewer";
 
-type Garden = Pick<Tables<"gardens">, "id" | "name" | "thumbnail_url" | "area_m2">;
+type Garden = Pick<Tables<"gardens">, "id" | "name" | "thumbnail_url" | "area_m2" | "depth_model" | "depth_model_updated_at">;
 type Zone = Pick<Tables<"garden_zones">, "id" | "name" | "type" | "area_m2" | "soil" | "sun_exposure">;
 type Plant = Tables<"user_plants"> & {
   plants_catalog?: { name_da: string | null; water_need: string | null; image_url: string | null } | null;
@@ -38,7 +40,8 @@ function readPosition(value: unknown): { x: number; y: number } | null {
   const x = typeof obj.normalized_x === "number" ? obj.normalized_x : null;
   const y = typeof obj.normalized_y === "number" ? obj.normalized_y : null;
   if (x === null || y === null) return null;
-  return clampNormalizedPoint(x, y);
+  const point = clampNormalizedPoint(x, y);
+  return { x: point.normalized_x, y: point.normalized_y };
 }
 
 function readZoneId(value: unknown): string | null {
@@ -79,6 +82,8 @@ export default function GardenMap({
   const mapRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Pin | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number } | null>(null);
+  const [mapMode, setMapMode] = useState<"living" | "twin">("living");
+  const depthModel = useMemo(() => coerceGardenDepthModel(garden.depth_model), [garden.depth_model]);
 
   const zoneFallback = useMemo(() => {
     const out: Record<string, { x: number; y: number }> = {};
@@ -97,8 +102,8 @@ export default function GardenMap({
         type: "plant",
         id: plant.id,
         label: labelPlant(plant),
-        x: stored?.normalized_x ?? zonePoint?.x ?? fallback.x,
-        y: stored?.normalized_y ?? zonePoint?.y ?? fallback.y,
+        x: stored?.x ?? zonePoint?.x ?? fallback.x,
+        y: stored?.y ?? zonePoint?.y ?? fallback.y,
         tone: plant.health_status === "watch" ? "warn" : "plant",
         zone_id: plant.zone_id,
       };
@@ -112,8 +117,8 @@ export default function GardenMap({
         type: "observation",
         id: obs.id,
         label: obs.caption || obs.kind,
-        x: stored?.normalized_x ?? zonePoint?.x ?? fallback.x,
-        y: stored?.normalized_y ?? zonePoint?.y ?? fallback.y,
+        x: stored?.x ?? zonePoint?.x ?? fallback.x,
+        y: stored?.y ?? zonePoint?.y ?? fallback.y,
         tone: obs.kind === "diagnosis" ? "warn" : obs.kind === "growth" ? "growth" : "photo",
         zone_id: obs.zone_id,
       };
@@ -128,8 +133,8 @@ export default function GardenMap({
         type: "device",
         id: device.id,
         label: device.name,
-        x: stored?.normalized_x ?? zonePoint?.x ?? fallback.x,
-        y: stored?.normalized_y ?? zonePoint?.y ?? fallback.y,
+        x: stored?.x ?? zonePoint?.x ?? fallback.x,
+        y: stored?.y ?? zonePoint?.y ?? fallback.y,
         tone: device.status === "online" || device.status === "running" ? "device" : "muted",
         zone_id: zoneId,
       };
@@ -190,6 +195,8 @@ export default function GardenMap({
           <h2>{garden.name}</h2>
         </div>
         <div className="companion-zone-filter" aria-label="Filtrer kortet efter zone">
+          <button className={mapMode === "living" ? "active" : ""} onClick={() => setMapMode("living")}>Kort</button>
+          <button className={mapMode === "twin" ? "active" : ""} onClick={() => setMapMode("twin")}>3D</button>
           <button className={!selectedZoneId ? "active" : ""} onClick={() => onSelectZone(null)}>Alle</button>
           {zones.slice(0, 6).map((zone) => (
             <button key={zone.id} className={selectedZoneId === zone.id ? "active" : ""} onClick={() => onSelectZone(zone.id)}>
@@ -206,59 +213,73 @@ export default function GardenMap({
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        {garden.thumbnail_url ? (
-          <img src={garden.thumbnail_url} alt="" className="companion-map-image" />
+        {mapMode === "twin" ? (
+          depthModel ? (
+            <GardenTwinViewer model={depthModel} className="companion-twin-viewer" compact />
+          ) : (
+            <div className="companion-map-placeholder companion-map-placeholder--depth">
+              <MapPin size={36} />
+              <span>Byg en 3D Garden Twin i Havemåler for at se højder, objekter og mobilscan her.</span>
+              <a className="btn btn-primary btn-sm" href={`/havemaaler?garden=${garden.id}&next=${encodeURIComponent("/havekompagnon")}`}>Åbn Havemåler</a>
+            </div>
+          )
         ) : (
-          <div className="companion-map-placeholder">
-            <MapPin size={36} />
-            <span>Mål haven for ortofoto. Indtil da kan du stadig placere planter og fotos visuelt.</span>
-          </div>
+          <>
+            {garden.thumbnail_url ? (
+              <img src={garden.thumbnail_url} alt="" className="companion-map-image" />
+            ) : (
+              <div className="companion-map-placeholder">
+                <MapPin size={36} />
+                <span>Mål haven for ortofoto. Indtil da kan du stadig placere planter og fotos visuelt.</span>
+              </div>
+            )}
+
+            <div className="companion-map-zones">
+              {zones.map((zone, index) => {
+                const point = zoneFallback[zone.id] ?? fallbackForIndex(index, zones.length);
+                return (
+                  <button
+                    key={zone.id}
+                    className={`companion-zone-chip ${selectedZoneId === zone.id ? "active" : ""}`}
+                    style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                    onClick={() => onSelectZone(selectedZoneId === zone.id ? null : zone.id)}
+                  >
+                    {zone.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            {visiblePins.map((pin) => {
+              const isDragging = drag?.type === pin.type && drag.id === pin.id;
+              const x = isDragging && draft ? draft.x : pin.x;
+              const y = isDragging && draft ? draft.y : pin.y;
+              return (
+                <button
+                  key={`${pin.type}-${pin.id}`}
+                  className={`companion-pin companion-pin--${pin.tone} ${isDragging ? "dragging" : ""}`}
+                  style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                  onPointerDown={(e) => startDrag(pin, e)}
+                  onClick={() => pin.type === "plant" && onSelectPlant?.(pin.id)}
+                  title={`${pin.label} · træk for at flytte`}
+                >
+                  {pin.type === "plant" && <Sprout size={15} />}
+                  {pin.type === "observation" && (pin.tone === "photo" ? <Camera size={15} /> : <Leaf size={15} />)}
+                  {pin.type === "device" && (pin.tone === "device" ? <Radio size={15} /> : <Droplets size={15} />)}
+                  <span>{pin.label}</span>
+                  <Move size={11} className="companion-pin-move" />
+                </button>
+              );
+            })}
+
+            <div className="companion-map-legend" aria-label="Kortlag">
+              <span><i className="plant" /> Plante</span>
+              <span><i className="photo" /> Foto</span>
+              <span><i className="warn" /> Risiko</span>
+              <span><i className="device" /> Sensor</span>
+            </div>
+          </>
         )}
-
-        <div className="companion-map-zones">
-          {zones.map((zone, index) => {
-            const point = zoneFallback[zone.id] ?? fallbackForIndex(index, zones.length);
-            return (
-              <button
-                key={zone.id}
-                className={`companion-zone-chip ${selectedZoneId === zone.id ? "active" : ""}`}
-                style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-                onClick={() => onSelectZone(selectedZoneId === zone.id ? null : zone.id)}
-              >
-                {zone.name}
-              </button>
-            );
-          })}
-        </div>
-
-        {visiblePins.map((pin) => {
-          const isDragging = drag?.type === pin.type && drag.id === pin.id;
-          const x = isDragging && draft ? draft.x : pin.x;
-          const y = isDragging && draft ? draft.y : pin.y;
-          return (
-            <button
-              key={`${pin.type}-${pin.id}`}
-              className={`companion-pin companion-pin--${pin.tone} ${isDragging ? "dragging" : ""}`}
-              style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
-              onPointerDown={(e) => startDrag(pin, e)}
-              onClick={() => pin.type === "plant" && onSelectPlant?.(pin.id)}
-              title={`${pin.label} · træk for at flytte`}
-            >
-              {pin.type === "plant" && <Sprout size={15} />}
-              {pin.type === "observation" && (pin.tone === "photo" ? <Camera size={15} /> : <Leaf size={15} />)}
-              {pin.type === "device" && (pin.tone === "device" ? <Radio size={15} /> : <Droplets size={15} />)}
-              <span>{pin.label}</span>
-              <Move size={11} className="companion-pin-move" />
-            </button>
-          );
-        })}
-
-        <div className="companion-map-legend" aria-label="Kortlag">
-          <span><i className="plant" /> Plante</span>
-          <span><i className="photo" /> Foto</span>
-          <span><i className="warn" /> Risiko</span>
-          <span><i className="device" /> Sensor</span>
-        </div>
       </div>
 
       <div className="companion-zone-memory">

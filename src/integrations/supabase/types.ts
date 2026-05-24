@@ -533,6 +533,8 @@ export type Database = {
           address: string | null
           area_m2: number | null
           created_at: string
+          depth_model: Json | null
+          depth_model_updated_at: string | null
           exclusions: Json | null
           id: string
           imagery_source: string | null
@@ -549,6 +551,8 @@ export type Database = {
           address?: string | null
           area_m2?: number | null
           created_at?: string
+          depth_model?: Json | null
+          depth_model_updated_at?: string | null
           exclusions?: Json | null
           id?: string
           imagery_source?: string | null
@@ -565,6 +569,8 @@ export type Database = {
           address?: string | null
           area_m2?: number | null
           created_at?: string
+          depth_model?: Json | null
+          depth_model_updated_at?: string | null
           exclusions?: Json | null
           id?: string
           imagery_source?: string | null
@@ -578,6 +584,146 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      garden_scan_sessions: {
+        Row: {
+          anchors: Json
+          capture_client_version: string | null
+          capture_metadata: Json
+          claimed_by: string | null
+          confidence: number | null
+          created_at: string
+          device_capabilities: Json
+          device_model: string | null
+          error_code: string | null
+          error_detail: string | null
+          garden_id: string
+          id: string
+          last_status_at: string
+          manifest_path: string | null
+          media_retention_until: string
+          pipeline_version: string
+          processing_attempts: number
+          processing_finished_at: string | null
+          processing_started_at: string | null
+          result_json: Json | null
+          status: string
+          status_history: Json
+          updated_at: string
+          upload_prefix: string | null
+          user_id: string
+          warnings: string[]
+        }
+        Insert: {
+          anchors?: Json
+          capture_client_version?: string | null
+          capture_metadata?: Json
+          claimed_by?: string | null
+          confidence?: number | null
+          created_at?: string
+          device_capabilities?: Json
+          device_model?: string | null
+          error_code?: string | null
+          error_detail?: string | null
+          garden_id: string
+          id?: string
+          last_status_at?: string
+          manifest_path?: string | null
+          media_retention_until?: string
+          pipeline_version?: string
+          processing_attempts?: number
+          processing_finished_at?: string | null
+          processing_started_at?: string | null
+          result_json?: Json | null
+          status?: string
+          status_history?: Json
+          updated_at?: string
+          upload_prefix?: string | null
+          user_id: string
+          warnings?: string[]
+        }
+        Update: {
+          anchors?: Json
+          capture_client_version?: string | null
+          capture_metadata?: Json
+          claimed_by?: string | null
+          confidence?: number | null
+          created_at?: string
+          device_capabilities?: Json
+          device_model?: string | null
+          error_code?: string | null
+          error_detail?: string | null
+          garden_id?: string
+          id?: string
+          last_status_at?: string
+          manifest_path?: string | null
+          media_retention_until?: string
+          pipeline_version?: string
+          processing_attempts?: number
+          processing_finished_at?: string | null
+          processing_started_at?: string | null
+          result_json?: Json | null
+          status?: string
+          status_history?: Json
+          updated_at?: string
+          upload_prefix?: string | null
+          user_id?: string
+          warnings?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_scan_sessions_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_scan_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          garden_id: string
+          id: string
+          payload: Json
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          garden_id: string
+          id?: string
+          payload?: Json
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          garden_id?: string
+          id?: string
+          payload?: Json
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_scan_events_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "garden_scan_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "garden_scan_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       integration_connections: {
         Row: {

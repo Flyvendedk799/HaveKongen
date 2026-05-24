@@ -65,6 +65,7 @@
 
   /* Make room for the bar above page content */
   body { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+  body.is-mobile-scan { padding-bottom: 0; }
 }
 
 /* ---------- Generic mobile typography & spacing ---------- */
@@ -82,6 +83,42 @@
   /* Buttons easier to tap */
   .btn { height: 46px; padding: 0 18px; }
   .btn-sm { height: 38px; padding: 0 14px; }
+}
+
+@media (max-width: 560px) {
+  .mobile-scan-page .app-nav {
+    display: none;
+  }
+  .mobile-scan-shell {
+    min-height: 100svh;
+    padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(12px, env(safe-area-inset-bottom, 0px));
+    grid-template-rows: auto minmax(320px, 1fr) auto auto auto auto;
+  }
+  .mobile-scan-header {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .mobile-scan-header small {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .mobile-scan-camera {
+    min-height: 52svh;
+    border-radius: 22px;
+  }
+  .mobile-scan-hud {
+    grid-template-columns: 1fr;
+    left: auto;
+    right: 8px;
+    bottom: 8px;
+    width: min(146px, 42vw);
+  }
+  .mobile-scan-hud span {
+    justify-content: flex-start;
+    padding: 0 10px;
+  }
+  .mobile-scan-anchors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ---------- Top nav (landing — dark) ---------- */
@@ -348,6 +385,27 @@
     font-size: 13px;
     font-weight: 500;
     touch-action: manipulation;
+  }
+  .garden-twin-viewer {
+    min-height: 460px;
+  }
+  .garden-twin-hud {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    flex-direction: column;
+  }
+  .garden-twin-kpis {
+    max-width: none;
+    justify-content: flex-start;
+  }
+  .garden-twin-toggles {
+    bottom: 10px;
+    max-width: calc(100% - 20px);
+    overflow-x: auto;
+  }
+  .garden-twin-legend {
+    display: none;
   }
   .sizer-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
