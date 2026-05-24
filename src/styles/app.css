@@ -912,7 +912,8 @@
   cursor: crosshair;
 }
 .mobile-scan-camera video,
-.mobile-scan-standby {
+.mobile-scan-standby,
+.mobile-scan-camera-loading {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -920,8 +921,16 @@
 }
 .mobile-scan-camera video {
   object-fit: cover;
+  z-index: 0;
+  opacity: 0;
+  background: #06100b;
 }
-.mobile-scan-standby {
+.mobile-scan-camera video.is-live {
+  opacity: 1;
+}
+.mobile-scan-standby,
+.mobile-scan-camera-loading {
+  z-index: 1;
   display: grid;
   place-items: center;
   align-content: center;
@@ -933,6 +942,13 @@
 }
 .mobile-scan-standby span {
   font-size: 14px;
+}
+.mobile-scan-camera-loading {
+  background: rgba(12,26,19,0.52);
+  backdrop-filter: blur(2px);
+}
+.mobile-scan-camera-loading span {
+  font-size: 13px;
 }
 .mobile-scan-camera canvas {
   display: none;
