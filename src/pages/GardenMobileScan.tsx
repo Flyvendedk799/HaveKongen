@@ -288,6 +288,7 @@ export default function GardenMobileScan() {
   const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraLive, setCameraLive] = useState(false);
   const [captureSeconds, setCaptureSeconds] = useState(0);
 
   const uploadPrefix = session?.upload_prefix ?? (user ? `${user.id}/${sessionId}` : "");
@@ -418,8 +419,30 @@ export default function GardenMobileScan() {
     return () => window.removeEventListener("devicemotion", onMotion);
   }, [motionEnabled]);
 
+  const attachStreamToVideo = useCallback(async (stream: MediaStream) => {
+    const video = videoRef.current;
+    if (!video) return false;
+    if (video.srcObject !== stream) video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
+    setCameraLive(true);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (state !== "camera" && state !== "uploading") return;
+    const stream = streamRef.current;
+    if (!stream) return;
+    void attachStreamToVideo(stream).catch((error) => {
+      setCameraLive(false);
+      setCameraError(error instanceof Error ? error.message : "Kameravisningen kunne ikke starte.");
+    });
+  }, [attachStreamToVideo, state]);
+
   async function startCamera() {
     setCameraError(null);
+    setCameraLive(false);
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
         throw new Error("Kamera kræver HTTPS på telefonen. Åbn scan-linket fra den sikre Havemåler-side og prøv igen.");
@@ -441,29 +464,35 @@ export default function GardenMobileScan() {
           height: { ideal: 720 },
         },
       });
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      await attachStreamToVideo(stream);
       captureStartedAtRef.current = new Date().toISOString();
       setCaptureSeconds(0);
       setState("camera");
-      const { data } = await supabase.functions.invoke("complete-garden-scan-session", {
-        body: {
-          session_id: sessionId,
-          status: "capturing",
-          actor: "mobile_web",
-          reason: "camera_started",
-          capture_metadata: {
-            client: "mobile_web",
-            user_agent: navigator.userAgent,
-            device_motion: motionGranted,
+      try {
+        const { data, error } = await supabase.functions.invoke("complete-garden-scan-session", {
+          body: {
+            session_id: sessionId,
+            status: "capturing",
+            actor: "mobile_web",
+            reason: "camera_started",
+            capture_metadata: {
+              client: "mobile_web",
+              user_agent: navigator.userAgent,
+              device_motion: motionGranted,
+            },
           },
-        },
-      });
-      if (data?.session) setSession(data.session as GardenScanSession);
+        });
+        if (error) console.warn("Could not mark scan session as capturing", error);
+        if (data?.session) setSession(data.session as GardenScanSession);
+      } catch (statusError) {
+        console.warn("Could not mark scan session as capturing", statusError);
+      }
     } catch (error) {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      setCameraLive(false);
       setCameraError(error instanceof Error ? error.message : "Kamera kunne ikke startes.");
       setState("ready");
     }
@@ -698,6 +727,7 @@ export default function GardenMobileScan() {
       if (error) throw error;
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      setCameraLive(false);
       if (data?.session) setSession(data.session as GardenScanSession);
       setState("uploaded");
       toast.success("Mobilscan uploadet");
@@ -754,12 +784,26 @@ export default function GardenMobileScan() {
         )}
 
         <div className={`mobile-scan-camera ${state === "camera" ? "is-marking" : ""}`} onPointerDown={(event) => { void handleCameraTap(event); }}>
-          {state === "camera" || state === "uploading" ? (
-            <video ref={videoRef} playsInline muted />
-          ) : (
+          <video
+            ref={videoRef}
+            className={cameraLive ? "is-live" : ""}
+            playsInline
+            muted
+            autoPlay
+            onLoadedData={() => setCameraLive(true)}
+            onCanPlay={() => setCameraLive(true)}
+            onPlaying={() => setCameraLive(true)}
+          />
+          {state !== "camera" && state !== "uploading" && (
             <div className="mobile-scan-standby">
               <Video size={42} />
               <span>{state === "uploaded" ? "Upload færdig" : "Kamera klar"}</span>
+            </div>
+          )}
+          {state === "camera" && !cameraLive && (
+            <div className="mobile-scan-camera-loading">
+              <Video size={30} />
+              <span>Starter kamera...</span>
             </div>
           )}
           <canvas ref={canvasRef} aria-hidden="true" />
