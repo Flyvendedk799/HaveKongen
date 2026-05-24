@@ -68,6 +68,7 @@
   body.is-mobile-scan { padding-bottom: 0; }
   body.is-havemaaler-measuring { padding-bottom: 0; }
   body.is-havemaaler-measuring .mobile-tabbar {
+    display: none;
     transform: translateY(140%);
     opacity: 0;
     pointer-events: none;

@@ -344,7 +344,7 @@ export default function GardenMobileScan() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
-      navigate(`/login?redirect=${encodeURIComponent(`/havemaaler/scan?garden_id=${gardenId}&session_id=${sessionId}`)}`);
+      navigate(`/login?next=${encodeURIComponent(`/havemaaler/scan?garden_id=${gardenId}&session_id=${sessionId}`)}`);
       return;
     }
     if (!gardenId || !sessionId) {

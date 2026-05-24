@@ -130,6 +130,16 @@ function safeInternalPath(value: string | null) {
   return value;
 }
 
+function uniqueSuggestions(items: Suggestion[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.place_name.toLowerCase()}|${item.center[0].toFixed(6)},${item.center[1].toFixed(6)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function ringBbox(ring?: Ring | null): [number, number, number, number] | undefined {
   if (!ring || ring.length < 3) return undefined;
   let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
@@ -274,13 +284,13 @@ export default function GardenSizer() {
             text: `${a.vejnavn} ${a.husnr}`,
             source: "dawa" as const,
           }));
-        if (exact.length) { setSuggestions(exact); return; }
+        if (exact.length) { setSuggestions(uniqueSuggestions(exact)); return; }
         if (!mapboxToken) return;
         const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=dk&language=da&limit=6&access_token=${mapboxToken}`;
         const mr = await fetch(url); const mj = await mr.json();
-        setSuggestions((mj.features ?? []).map((f: any) => ({
+        setSuggestions(uniqueSuggestions((mj.features ?? []).map((f: any) => ({
           id: f.id, place_name: f.place_name, center: f.center as LngLat, text: f.text, source: "mapbox" as const,
-        })));
+        }))));
       } catch { /* ignore */ }
     }, 220);
     return () => clearTimeout(t);
@@ -296,6 +306,14 @@ export default function GardenSizer() {
     setMapView("map");
     // Trigger cinematic pinpoint; finalises into step 2 in onDone
     setPinpointing({ name: s.place_name, center: s.center });
+  }
+
+  function chooseFirstAddress() {
+    if (suggestions[0]) {
+      chooseAddress(suggestions[0]);
+      return;
+    }
+    toast(query.trim().length < 2 ? "Indtast en adresse først" : "Vælg en adresse fra listen");
   }
 
   // ----- Build style for current imagery choice -----
@@ -798,6 +816,11 @@ export default function GardenSizer() {
         : "Fortsæt 3D-scan";
   const scanPanelButtonLabel = !generatedDepthModel ? "Tegn først" : !editingGarden?.id ? "Gem & scan" : undefined;
 
+  function requireLoginForHavemaaler(message: string) {
+    toast(message);
+    navigate(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+  }
+
   // ----- History (undo/redo) -----
   type Snap2 = { main: Ring; mainClosed: boolean; additionalLawns: Ring[]; currentLawn: Ring; exclusions: Ring[] };
   const lastSerialized = useRef<string>("");
@@ -866,8 +889,7 @@ export default function GardenSizer() {
 
   async function saveGardenForScan(): Promise<SavedGarden | null> {
     if (!user) {
-      toast("Log ind for at starte mobilscan");
-      navigate("/login?redirect=/havemaaler");
+      requireLoginForHavemaaler("Log ind for at starte mobilscan");
       return null;
     }
     if (!chosen || area === 0 || !generatedDepthModel) {
@@ -945,13 +967,12 @@ export default function GardenSizer() {
   }
 
   async function startGardenScan() {
-    if (!user) {
-      toast("Log ind for at starte mobilscan");
-      navigate("/login?redirect=/havemaaler");
-      return;
-    }
     if (!generatedDepthModel) {
       toast("Haven mangler en lukket græsflade");
+      return;
+    }
+    if (!user) {
+      requireLoginForHavemaaler("Log ind for at starte mobilscan");
       return;
     }
     setStartingScan(true);
@@ -1518,8 +1539,8 @@ export default function GardenSizer() {
   }
 
   async function saveGarden() {
-    if (!user) { toast("Log ind for at gemme din have"); navigate("/login?redirect=/havemaaler"); return; }
     if (!chosen || area === 0) return;
+    if (!user) { requireLoginForHavemaaler("Log ind for at gemme din have"); return; }
     setSaving(true);
 
     // Thumbnail upload
@@ -1645,7 +1666,7 @@ export default function GardenSizer() {
                     placeholder="F.eks. Søndergade 14, 8000 Aarhus C"
                     autoComplete="off"
                   />
-                  <button onClick={() => suggestions[0] && chooseAddress(suggestions[0])}>
+                  <button onClick={chooseFirstAddress}>
                     Hent kort
                     <svg width="12" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 5h12m0 0L9 1m4 4L9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
                   </button>
@@ -1721,7 +1742,7 @@ export default function GardenSizer() {
                   <button onClick={() => ortoCfg && setImagery("ortofoto")} disabled={!ortoCfg} style={{ padding: "6px 10px", background: imagery === "ortofoto" ? "var(--gold)" : "transparent", color: imagery === "ortofoto" ? "#14271d" : "inherit", border: 0, opacity: ortoCfg ? 1 : 0.45 }}>Ortofoto 12cm</button>
                   <button onClick={() => setImagery("mapbox")} style={{ padding: "6px 10px", background: imagery === "mapbox" ? "var(--gold)" : "transparent", color: imagery === "mapbox" ? "#14271d" : "inherit", border: 0 }}>Mapbox</button>
                 </div>
-                <button className="change-addr" onClick={() => { setStep(1); clear(); }}>
+                <button className="change-addr" aria-label="Skift adresse" title="Skift adresse" onClick={() => { setStep(1); clear(); }}>
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M2 6l3-3M2 6l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
                   Skift adresse
                 </button>
