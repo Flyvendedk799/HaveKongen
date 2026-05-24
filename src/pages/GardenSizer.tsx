@@ -140,6 +140,27 @@ function uniqueSuggestions(items: Suggestion[]) {
   });
 }
 
+function describeSupabaseError(error: unknown) {
+  if (!error) return undefined;
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error !== "object") return undefined;
+
+  const record = error as Record<string, unknown>;
+  const message = typeof record.message === "string" ? record.message : null;
+  const details = typeof record.details === "string" ? record.details : null;
+  const hint = typeof record.hint === "string" ? record.hint : null;
+  const code = typeof record.code === "string" ? record.code : null;
+  return [message, details, hint, code ? `Kode: ${code}` : null].filter(Boolean).join(" · ") || undefined;
+}
+
+function isDepthModelSchemaError(error: unknown) {
+  const description = describeSupabaseError(error)?.toLowerCase() ?? "";
+  return description.includes("depth_model")
+    || description.includes("depth_model_updated_at")
+    || (description.includes("schema cache") && description.includes("depth"));
+}
+
 function ringBbox(ring?: Ring | null): [number, number, number, number] | undefined {
   if (!ring || ring.length < 3) return undefined;
   let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
@@ -907,7 +928,8 @@ export default function GardenSizer() {
         name: chosen.name.split(",")[0],
         generatedAt: new Date().toISOString(),
       };
-      const gardenPayload = {
+      const depthModelUpdatedAt = new Date().toISOString();
+      const gardenPayloadBase = {
         name: chosen.name.split(",")[0],
         address: chosen.name,
         latitude: chosen.center[1],
@@ -917,49 +939,101 @@ export default function GardenSizer() {
         exclusions: exclusions.map(r => ({ type: "Polygon", coordinates: [[...r, r[0]]] })),
         imagery_source: imagery,
         thumbnail_url: editingGarden?.thumbnail_url ?? null,
-        depth_model: depthModelToJson(depthModelForSave),
-        depth_model_updated_at: new Date().toISOString(),
       };
-      const { data: garden, error } = editingGarden
+      const gardenPayloadWithDepth = {
+        ...gardenPayloadBase,
+        depth_model: depthModelToJson(depthModelForSave),
+        depth_model_updated_at: depthModelUpdatedAt,
+      };
+
+      let garden: unknown = null;
+      let saveError: unknown = null;
+      let depthPreviewSavedWithGarden = true;
+      const saveWithDepthResult = editingGarden
         ? await supabase
           .from("gardens")
-          .update(gardenPayload)
+          .update(gardenPayloadWithDepth)
           .eq("id", editingGarden.id)
           .eq("user_id", user.id)
           .select()
           .single()
         : await supabase
           .from("gardens")
-          .insert({ user_id: user.id, ...gardenPayload })
+          .insert({ user_id: user.id, ...gardenPayloadWithDepth })
           .select()
           .single();
-      if (error || !garden) {
-        toast.error("Kunne ikke gemme haven før mobilscan");
+
+      garden = saveWithDepthResult.data;
+      saveError = saveWithDepthResult.error;
+
+      if ((saveError || !garden) && isDepthModelSchemaError(saveError)) {
+        depthPreviewSavedWithGarden = false;
+        console.warn("saveGardenForScan retrying without depth preview fields", saveError);
+        const saveCoreResult = editingGarden
+          ? await supabase
+            .from("gardens")
+            .update(gardenPayloadBase)
+            .eq("id", editingGarden.id)
+            .eq("user_id", user.id)
+            .select()
+            .single()
+          : await supabase
+            .from("gardens")
+            .insert({ user_id: user.id, ...gardenPayloadBase })
+            .select()
+            .single();
+        garden = saveCoreResult.data;
+        saveError = saveCoreResult.error;
+      }
+
+      if (saveError || !garden) {
+        console.error("saveGardenForScan failed", saveError);
+        toast.error("Kunne ikke gemme haven før mobilscan", {
+          description: describeSupabaseError(saveError) ?? "Prøv igen om lidt.",
+        });
         return null;
       }
+
       const savedGarden = garden as SavedGarden;
       const depthModelWithGardenId = { ...depthModelForSave, gardenId: savedGarden.id };
-      const { error: depthError } = await supabase.from("gardens").update({
-        depth_model: depthModelToJson(depthModelWithGardenId),
-        depth_model_updated_at: new Date().toISOString(),
-      }).eq("id", savedGarden.id).eq("user_id", user.id);
-      if (depthError) {
-        toast.error("Have gemt, men 3D-grundlaget kunne ikke gemmes");
-        return null;
+      const softWarnings: string[] = [];
+
+      if (depthPreviewSavedWithGarden) {
+        const { error: depthError } = await supabase.from("gardens").update({
+          depth_model: depthModelToJson(depthModelWithGardenId),
+          depth_model_updated_at: new Date().toISOString(),
+        }).eq("id", savedGarden.id).eq("user_id", user.id);
+        if (depthError) {
+          console.warn("saveGardenForScan depth model update failed", depthError);
+          softWarnings.push("3D-preview gemmes efter selve scanningen.");
+        }
+      } else {
+        softWarnings.push("3D-preview gemmes efter selve scanningen.");
       }
+
       const zoneError = await syncLawnZones(savedGarden.id, Boolean(editingGarden));
       if (zoneError) {
-        toast.error("Have gemt, men zonerne kunne ikke gemmes");
-        return null;
+        console.warn("saveGardenForScan lawn zone sync failed", zoneError);
+        softWarnings.push("Plænezonen gemmes igen efter scan.");
       }
+
       setEditingGarden(savedGarden);
       setSavedDepthModel(depthModelWithGardenId);
       setActive(savedGarden.id);
       try { localStorage.removeItem(AUTOSAVE_KEY); } catch {}
-      toast.success("Have gemt. Starter mobilscan...");
+      if (softWarnings.length) {
+        toast.success("Have gemt. Starter mobilscan...", {
+          description: softWarnings.join(" "),
+        });
+      } else {
+        toast.success("Have gemt. Starter mobilscan...");
+      }
       return savedGarden;
-    } catch {
-      toast.error("Kunne ikke gemme haven før mobilscan");
+    } catch (error) {
+      console.error("saveGardenForScan crashed", error);
+      toast.error("Kunne ikke gemme haven før mobilscan", {
+        description: describeSupabaseError(error) ?? "Prøv igen om lidt.",
+      });
       return null;
     } finally {
       setSaving(false);
@@ -976,15 +1050,26 @@ export default function GardenSizer() {
       return;
     }
     setStartingScan(true);
-    let gardenForScan = editingGarden;
+    const gardenForScan = await saveGardenForScan();
     if (!gardenForScan?.id) {
-      gardenForScan = await saveGardenForScan();
-      if (!gardenForScan?.id) {
-        setStartingScan(false);
-        return;
-      }
+      setStartingScan(false);
+      return;
     }
-    const activeSession = scanSessions.find((session) => !isTerminalScanStatus(session.status));
+    let currentScanSessions = scanSessions.filter((session) => session.garden_id === gardenForScan.id);
+    const { data: freshScanSessions, error: scanSessionError } = await supabase
+      .from("garden_scan_sessions")
+      .select("*")
+      .eq("garden_id", gardenForScan.id)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    if (scanSessionError) {
+      console.warn("startGardenScan could not refresh scan sessions", scanSessionError);
+    } else {
+      currentScanSessions = (freshScanSessions ?? []) as GardenScanSession[];
+      setScanSessions(currentScanSessions);
+    }
+    const activeSession = currentScanSessions.find((session) => !isTerminalScanStatus(session.status));
     if (activeSession) {
       const scanUrl = webGardenScanUrl(gardenForScan.id, activeSession.id);
       setScanLaunch({
@@ -1417,13 +1502,29 @@ export default function GardenSizer() {
     let cancelled = false;
     async function loadSavedGarden() {
       setLoadingSavedGarden(true);
+      const gardenFieldsWithDepth = "id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url, depth_model, depth_model_updated_at";
+      const gardenFieldsBase = "id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url";
+      const gardenQuery = supabase
+        .from("gardens")
+        .select(gardenFieldsWithDepth)
+        .eq("id", gardenIdParam)
+        .eq("user_id", user.id)
+        .maybeSingle()
+        .then(async (result) => {
+          if (result.error && isDepthModelSchemaError(result.error)) {
+            console.warn("loadSavedGarden retrying without depth preview fields", result.error);
+            return supabase
+              .from("gardens")
+              .select(gardenFieldsBase)
+              .eq("id", gardenIdParam)
+              .eq("user_id", user.id)
+              .maybeSingle();
+          }
+          return result;
+        });
+
       const [{ data: gardenData, error: gardenError }, { data: zoneRows, error: zoneError }] = await Promise.all([
-        supabase
-          .from("gardens")
-          .select("id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url, depth_model, depth_model_updated_at")
-          .eq("id", gardenIdParam)
-          .eq("user_id", user.id)
-          .maybeSingle(),
+        gardenQuery,
         supabase
           .from("garden_zones")
           .select("id, polygon")
@@ -1569,7 +1670,8 @@ export default function GardenSizer() {
       }
       : null;
 
-    const gardenPayload = {
+    const depthModelUpdatedAt = new Date().toISOString();
+    const gardenPayloadBase = {
       name: chosen.name.split(",")[0],
       address: chosen.name,
       latitude: chosen.center[1],
@@ -1579,31 +1681,77 @@ export default function GardenSizer() {
       exclusions: exclusions.map(r => ({ type: "Polygon", coordinates: [[...r, r[0]]] })),
       imagery_source: imagery,
       thumbnail_url,
+    };
+    const gardenPayloadWithDepth = {
+      ...gardenPayloadBase,
       depth_model: depthModelForSave ? depthModelToJson(depthModelForSave) : null,
-      depth_model_updated_at: depthModelForSave ? new Date().toISOString() : null,
+      depth_model_updated_at: depthModelForSave ? depthModelUpdatedAt : null,
     };
 
-    const { data: g, error } = editingGarden
+    let savedGardenRecord: unknown = null;
+    let saveError: unknown = null;
+    let depthColumnsAvailable = true;
+    const saveWithDepthResult = editingGarden
       ? await supabase
         .from("gardens")
-        .update(gardenPayload)
+        .update(gardenPayloadWithDepth)
         .eq("id", editingGarden.id)
         .eq("user_id", user.id)
         .select()
         .single()
       : await supabase.from("gardens").insert({
         user_id: user.id,
-        ...gardenPayload,
+        ...gardenPayloadWithDepth,
       }).select().single();
-    if (error || !g) { toast.error("Kunne ikke gemme have"); setSaving(false); return; }
-    if (!editingGarden && depthModelForSave) {
+
+    savedGardenRecord = saveWithDepthResult.data;
+    saveError = saveWithDepthResult.error;
+
+    if ((saveError || !savedGardenRecord) && isDepthModelSchemaError(saveError)) {
+      depthColumnsAvailable = false;
+      console.warn("saveGarden retrying without depth preview fields", saveError);
+      const saveCoreResult = editingGarden
+        ? await supabase
+          .from("gardens")
+          .update(gardenPayloadBase)
+          .eq("id", editingGarden.id)
+          .eq("user_id", user.id)
+          .select()
+          .single()
+        : await supabase.from("gardens").insert({
+          user_id: user.id,
+          ...gardenPayloadBase,
+        }).select().single();
+      savedGardenRecord = saveCoreResult.data;
+      saveError = saveCoreResult.error;
+    }
+
+    if (saveError || !savedGardenRecord) {
+      console.error("saveGarden failed", saveError);
+      toast.error("Kunne ikke gemme have", {
+        description: describeSupabaseError(saveError) ?? "Prøv igen om lidt.",
+      });
+      setSaving(false);
+      return;
+    }
+
+    const g = savedGardenRecord as SavedGarden;
+    const softWarnings: string[] = [];
+    if (!editingGarden && depthModelForSave && depthColumnsAvailable) {
       const depthModelWithGardenId = { ...depthModelForSave, gardenId: g.id };
-      await supabase.from("gardens").update({
+      const { error: depthError } = await supabase.from("gardens").update({
         depth_model: depthModelToJson(depthModelWithGardenId),
         depth_model_updated_at: new Date().toISOString(),
       }).eq("id", g.id).eq("user_id", user.id);
+      if (depthError) {
+        console.warn("saveGarden depth model update failed", depthError);
+        softWarnings.push("3D-preview gemmes efter selve scanningen.");
+      }
       setSavedDepthModel(depthModelWithGardenId);
     } else {
+      if (depthModelForSave && !depthColumnsAvailable) {
+        softWarnings.push("3D-preview gemmes efter selve scanningen.");
+      }
       setSavedDepthModel(depthModelForSave);
     }
     const zoneError = await syncLawnZones(g.id, Boolean(editingGarden));
@@ -1612,6 +1760,7 @@ export default function GardenSizer() {
     try { localStorage.removeItem(AUTOSAVE_KEY); } catch {}
     toast.success(editingGarden ? "Måling opdateret" : "Have gemt", {
       action: { label: "Åbn Havekompagnon", onClick: () => navigate("/havekompagnon") },
+      description: softWarnings.length ? softWarnings.join(" ") : undefined,
       duration: 6000,
     });
     navigate(returnTo ?? (editingGarden ? "/havekompagnon" : "/konto"));
