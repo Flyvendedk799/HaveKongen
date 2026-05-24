@@ -1,4 +1,5 @@
 import type { Forecast } from "@/lib/wateringAI";
+import type { Json } from "@/integrations/supabase/types";
 import type { CareAction, NormalizedScanResult } from "@/lib/companionTypes";
 
 type ZoneLike = {
