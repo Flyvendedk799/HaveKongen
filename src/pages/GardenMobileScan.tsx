@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Camera, CheckCircle2, CircleDot, Compass, UploadCloud, Video } from "lucide-react";
 import { toast } from "sonner";
@@ -9,7 +9,15 @@ import { useAuth } from "@/lib/auth";
 import type { LngLat, LocalPoint } from "@/lib/gardenDepth";
 import {
   buildUploadTargets,
+  anchorSpreadMeters,
+  countAlignableAnchors,
   inspectScanManifest,
+  MIN_ALIGNED_ANCHORS,
+  MIN_ANCHOR_SPREAD_M,
+  MIN_SCAN_KEYFRAMES,
+  RECOMMENDED_ALIGNED_ANCHORS,
+  RECOMMENDED_ANCHOR_SPREAD_M,
+  RECOMMENDED_SCAN_KEYFRAMES,
   scanActionHint,
   scanManifestToJson,
   scanProgress,
@@ -27,6 +35,7 @@ type FrameCapture = {
   capturedAt: string;
   width: number;
   height: number;
+  source: "auto" | "manual" | "anchor";
 };
 
 type MotionSample = {
@@ -266,6 +275,8 @@ export default function GardenMobileScan() {
   const streamRef = useRef<MediaStream | null>(null);
   const motionSamplesRef = useRef<MotionSample[]>([]);
   const captureStartedAtRef = useRef<string | null>(null);
+  const frameIndexRef = useRef(0);
+  const captureInFlightRef = useRef(false);
   const frameUrlsRef = useRef<string[]>([]);
   const [state, setState] = useState<CaptureState>("loading");
   const [session, setSession] = useState<GardenScanSession | null>(null);
@@ -277,13 +288,35 @@ export default function GardenMobileScan() {
   const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [captureSeconds, setCaptureSeconds] = useState(0);
 
   const uploadPrefix = session?.upload_prefix ?? (user ? `${user.id}/${sessionId}` : "");
   const uploadTargets = useMemo(() => buildUploadTargets(uploadPrefix || "pending"), [uploadPrefix]);
-  const requiredFramesReady = frames.length >= 8;
-  const anchorsReady = anchors.length >= 2;
+  const alignedAnchorCount = countAlignableAnchors(anchors);
+  const anchorSpreadM = anchorSpreadMeters(anchors);
+  const requiredFramesReady = frames.length >= MIN_SCAN_KEYFRAMES;
+  const anchorCountReady = alignedAnchorCount >= MIN_ALIGNED_ANCHORS;
+  const anchorSpreadReady = alignedAnchorCount < MIN_ALIGNED_ANCHORS || anchorSpreadM >= MIN_ANCHOR_SPREAD_M;
+  const anchorsReady = anchorCountReady && anchorSpreadReady;
   const readyToUpload = Boolean(session && uploadPrefix && requiredFramesReady && anchorsReady);
   const selectedAnchor = anchorTargets.find((candidate) => candidate.id === selectedAnchorId) ?? null;
+  const hasMapAnchorTargets = anchorTargets.some((target) => Boolean(target.mapLngLat && target.local));
+  const uploadBlockedReason = !requiredFramesReady
+    ? `${Math.max(0, MIN_SCAN_KEYFRAMES - frames.length)} keyframes mangler`
+    : !anchorCountReady
+      ? `${Math.max(0, MIN_ALIGNED_ANCHORS - alignedAnchorCount)} kortankre mangler`
+      : !anchorSpreadReady
+        ? "vælg ankre længere fra hinanden"
+      : "";
+  const readinessHint = !requiredFramesReady
+    ? "Gå langsomt rundt mens kameraet selv samler keyframes."
+    : !anchorCountReady
+      ? "Tryk mindst to kortankre i kameraet."
+      : !anchorSpreadReady
+        ? "Vælg to ankre med mere afstand, fx hushjørne og skur/låge."
+        : anchorSpreadM < RECOMMENDED_ANCHOR_SPREAD_M
+          ? "Klar til upload. Et ekstra anker længere væk giver bedre alignment."
+          : "Klar til upload med stærkere alignment-grundlag.";
 
   useEffect(() => {
     document.body.classList.add("is-mobile-scan");
@@ -319,6 +352,7 @@ export default function GardenMobileScan() {
       const nextTargets = targets.length ? targets : fallbackAnchorTargets();
       setAnchorTargets(nextTargets);
       setMapFrame(readMapFrame(sessionRow.capture_metadata));
+      if (Array.isArray(sessionRow.anchors)) setAnchors(sessionRow.anchors as GardenScanAnchorObservation[]);
       setSelectedAnchorId(nextTargets[0]?.id ?? null);
       setState(["uploaded", "processing", "ready"].includes(sessionRow.status) ? "uploaded" : "ready");
     }
@@ -333,6 +367,15 @@ export default function GardenMobileScan() {
       frameUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
+
+  useEffect(() => {
+    if (state !== "camera") return;
+    const timer = window.setInterval(() => {
+      const started = captureStartedAtRef.current ? new Date(captureStartedAtRef.current).getTime() : Date.now();
+      setCaptureSeconds(Math.max(0, Math.round((Date.now() - started) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [state]);
 
   useEffect(() => {
     if (!motionEnabled) return;
@@ -386,8 +429,9 @@ export default function GardenMobileScan() {
         await videoRef.current.play();
       }
       captureStartedAtRef.current = new Date().toISOString();
+      setCaptureSeconds(0);
       setState("camera");
-      await supabase.functions.invoke("complete-garden-scan-session", {
+      const { data } = await supabase.functions.invoke("complete-garden-scan-session", {
         body: {
           session_id: sessionId,
           status: "capturing",
@@ -400,41 +444,66 @@ export default function GardenMobileScan() {
           },
         },
       });
+      if (data?.session) setSession(data.session as GardenScanSession);
     } catch (error) {
       setCameraError(error instanceof Error ? error.message : "Kamera kunne ikke startes.");
       setState("ready");
     }
   }
 
-  async function captureFrame(): Promise<FrameCapture | null> {
+  const captureFrame = useCallback(async (source: FrameCapture["source"] = "manual"): Promise<FrameCapture | null> => {
+    if (captureInFlightRef.current || !uploadPrefix) return null;
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || video.videoWidth === 0 || video.videoHeight === 0) return null;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
-    if (!blob) return null;
-    const id = `frame-${String(frames.length + 1).padStart(3, "0")}`;
-    const previewUrl = URL.createObjectURL(blob);
-    frameUrlsRef.current.push(previewUrl);
-    const frame: FrameCapture = {
-      id,
-      path: `${uploadPrefix}/frames/${id}.jpg`,
-      blob,
-      previewUrl,
-      capturedAt: new Date().toISOString(),
-      width: canvas.width,
-      height: canvas.height,
+    captureInFlightRef.current = true;
+    try {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+      if (!blob) return null;
+      const id = `frame-${String(frameIndexRef.current + 1).padStart(3, "0")}`;
+      frameIndexRef.current += 1;
+      const previewUrl = URL.createObjectURL(blob);
+      frameUrlsRef.current.push(previewUrl);
+      const frame: FrameCapture = {
+        id,
+        path: `${uploadPrefix}/frames/${id}.jpg`,
+        blob,
+        previewUrl,
+        capturedAt: new Date().toISOString(),
+        width: canvas.width,
+        height: canvas.height,
+        source,
+      };
+      setFrames((prev) => [...prev, frame]);
+      return frame;
+    } finally {
+      captureInFlightRef.current = false;
+    }
+  }, [uploadPrefix]);
+
+  useEffect(() => {
+    if (state !== "camera") return;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled || frameIndexRef.current >= 36) return;
+      void captureFrame("auto");
     };
-    setFrames((prev) => [...prev, frame]);
-    return frame;
-  }
+    const first = window.setTimeout(run, 900);
+    const interval = window.setInterval(run, 2800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    };
+  }, [captureFrame, state]);
 
   async function markAnchor(target: AnchorTarget, imagePoint: { x: number; y: number }) {
-    const frame = await captureFrame();
+    const frame = await captureFrame("anchor");
     const evidence = frame?.id ?? frames.at(-1)?.id;
     const markedIds = new Set([...anchors.map((anchor) => anchor.id), target.id]);
     setAnchors((prev) => [
@@ -495,6 +564,10 @@ export default function GardenMobileScan() {
         tracking_quality: motionSamplesRef.current.length > 10 ? "normal" : "limited",
         frame_count: frames.length,
         keyframe_count: frames.length,
+        automatic_keyframes: true,
+        frame_interval_seconds: 2.8,
+        anchor_count: anchors.length,
+        aligned_anchor_count: alignedAnchorCount,
         coverage_score: Math.min(0.92, 0.2 + frames.length * 0.055 + anchors.length * 0.08),
         low_light: null,
       },
@@ -524,12 +597,24 @@ export default function GardenMobileScan() {
         captured_at: frame.capturedAt,
         width: frame.width,
         height: frame.height,
+        source: frame.source,
       })),
     };
     const tracking = {
       version: 1,
       session_id: session.id,
       coordinate_space: "mobile_web_camera",
+      map_frame: mapFrame,
+      anchor_targets: anchorTargets,
+      capture_quality: {
+        keyframe_count: frames.length,
+        aligned_anchor_count: alignedAnchorCount,
+        anchor_spread_m: anchorSpreadM,
+        capture_seconds: manifest.capture.duration_seconds,
+        recommended_keyframes: RECOMMENDED_SCAN_KEYFRAMES,
+        recommended_anchors: RECOMMENDED_ALIGNED_ANCHORS,
+        recommended_anchor_spread_m: RECOMMENDED_ANCHOR_SPREAD_M,
+      },
       device_motion_samples: motionSamplesRef.current,
       anchors,
     };
@@ -547,7 +632,7 @@ export default function GardenMobileScan() {
         const { error } = await bucket.upload(byKind.preview, frames[0].blob, { contentType: "image/jpeg", upsert: true });
         if (error) throw error;
       }
-      const { error } = await supabase.functions.invoke("complete-garden-scan-session", {
+      const { data, error } = await supabase.functions.invoke("complete-garden-scan-session", {
         body: {
           session_id: session.id,
           status: "uploaded",
@@ -561,12 +646,16 @@ export default function GardenMobileScan() {
             capture_seconds: manifest.capture.duration_seconds,
             frame_count: frames.length,
             anchor_count: anchors.length,
+            aligned_anchor_count: alignedAnchorCount,
+            anchor_spread_m: anchorSpreadM,
             motion_samples: motionSamplesRef.current.length,
           },
         },
       });
       if (error) throw error;
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (data?.session) setSession(data.session as GardenScanSession);
       setState("uploaded");
       toast.success("Mobilscan uploadet");
     } catch (error) {
@@ -618,9 +707,9 @@ export default function GardenMobileScan() {
           )}
           <canvas ref={canvasRef} aria-hidden="true" />
           <div className="mobile-scan-hud">
-            <span><Camera size={13} /> {frames.length}/8 keyframes</span>
-            <span><CircleDot size={13} /> {anchors.length}/2 ankre</span>
-            <span><Compass size={13} /> {motionEnabled ? "Motion" : "Video"}</span>
+            <span><Camera size={13} /> {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} auto</span>
+            <span><CircleDot size={13} /> {alignedAnchorCount}/{MIN_ALIGNED_ANCHORS} ankre</span>
+            <span><Compass size={13} /> {anchorSpreadM ? `${Math.round(anchorSpreadM)}m` : `${captureSeconds}s`}</span>
           </div>
           {state === "camera" && selectedAnchor && (
             <div className="mobile-scan-target-hint">
@@ -630,20 +719,25 @@ export default function GardenMobileScan() {
         </div>
 
         {cameraError && <p className="mobile-scan-error">{cameraError}</p>}
+        {state !== "loading" && state !== "uploaded" && !hasMapAnchorTargets && (
+          <p className="mobile-scan-error">
+            Scan-sessionen mangler kortankre. Start en ny 3D-scan fra Havemåler, så kameraet kan alignes til plænen.
+          </p>
+        )}
 
         <div className="mobile-scan-actions">
           {state === "ready" && (
-            <button type="button" className="btn btn-primary" onClick={startCamera}>
+            <button type="button" className="btn btn-primary" onClick={startCamera} disabled={!hasMapAnchorTargets}>
               <Video size={16} /> Start kamera
             </button>
           )}
           {state === "camera" && (
             <>
               <button type="button" className="btn btn-primary" onClick={() => void captureFrame()}>
-                <Camera size={16} /> Tag keyframe
+                <Camera size={16} /> Ekstra keyframe
               </button>
               <button type="button" className="btn btn-ghost" onClick={uploadCapture} disabled={!readyToUpload}>
-                <UploadCloud size={16} /> Upload scan
+                <UploadCloud size={16} /> {readyToUpload ? "Upload scan" : uploadBlockedReason}
               </button>
             </>
           )}
@@ -661,7 +755,7 @@ export default function GardenMobileScan() {
 
         {state === "camera" && (
           <div className="mobile-scan-anchors">
-            <p>Vælg et kortanker, og tryk det samme punkt i kameraet. Det er det der gør alignment muligt.</p>
+            <p>{readinessHint}</p>
             {anchorTargets.map((target, index) => (
               <button
                 type="button"
@@ -684,7 +778,7 @@ export default function GardenMobileScan() {
 
         <footer className="mobile-scan-footer">
           <span>{scanActionHint(currentStatus)}</span>
-          <small>{uploadTargets.filter((target) => target.required).length} krævede filer · {uploadPrefix || "afventer session"}</small>
+          <small>{uploadTargets.filter((target) => target.required).length} krævede filer · {frames.length} keyframes · {alignedAnchorCount} kortankre · {Math.round(anchorSpreadM)}m ankerafstand · {uploadPrefix || "afventer session"}</small>
         </footer>
       </section>
     </div>

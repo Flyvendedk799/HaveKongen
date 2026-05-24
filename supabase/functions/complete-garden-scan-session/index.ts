@@ -76,6 +76,70 @@ function objectOrEmpty(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function isLngLat(value: unknown) {
+  return Array.isArray(value)
+    && value.length >= 2
+    && typeof value[0] === "number"
+    && typeof value[1] === "number"
+    && Number.isFinite(value[0])
+    && Number.isFinite(value[1]);
+}
+
+function isImagePoint(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const point = value as Record<string, unknown>;
+  return typeof point.x === "number"
+    && typeof point.y === "number"
+    && point.x >= 0
+    && point.x <= 1
+    && point.y >= 0
+    && point.y <= 1;
+}
+
+function isArLocal(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const point = value as Record<string, unknown>;
+  return typeof point.x === "number" && typeof point.y === "number" && typeof point.z === "number";
+}
+
+function countAlignableAnchors(value: unknown) {
+  if (!Array.isArray(value)) return 0;
+  return value.filter((anchor) => {
+    if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)) return false;
+    const row = anchor as Record<string, unknown>;
+    return isLngLat(row.mapLngLat) && (isImagePoint(row.imagePoint) || isArLocal(row.arLocal));
+  }).length;
+}
+
+function distanceMeters(a: [number, number], b: [number, number]) {
+  const midLat = ((a[1] + b[1]) / 2) * Math.PI / 180;
+  const dx = (b[0] - a[0]) * 111_320 * Math.cos(midLat);
+  const dy = (b[1] - a[1]) * 111_320;
+  return Math.hypot(dx, dy);
+}
+
+function anchorSpreadMeters(value: unknown) {
+  if (!Array.isArray(value)) return 0;
+  const anchors = value.filter((anchor) => {
+    if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)) return false;
+    const row = anchor as Record<string, unknown>;
+    return isLngLat(row.mapLngLat) && (isImagePoint(row.imagePoint) || isArLocal(row.arLocal));
+  }) as Array<Record<string, unknown>>;
+  let best = 0;
+  for (let i = 0; i < anchors.length; i += 1) {
+    for (let j = i + 1; j < anchors.length; j += 1) {
+      best = Math.max(best, distanceMeters(anchors[i].mapLngLat as [number, number], anchors[j].mapLngLat as [number, number]));
+    }
+  }
+  return best;
+}
+
+function numberFromRecord(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const next = (value as Record<string, unknown>)[key];
+  return typeof next === "number" && Number.isFinite(next) ? next : null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -100,7 +164,7 @@ Deno.serve(async (req) => {
 
     const { data: session, error: sessionError } = await sb
       .from("garden_scan_sessions")
-      .select("id,garden_id,user_id,status,manifest_path,status_history,processing_attempts,capture_metadata")
+      .select("id,garden_id,user_id,status,manifest_path,status_history,processing_attempts,capture_metadata,anchors,upload_prefix")
       .eq("id", sessionId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -122,6 +186,39 @@ Deno.serve(async (req) => {
     const now = new Date().toISOString();
     if (status === "uploaded" && !body.manifest_path && !session.manifest_path) {
       return json({ error: "manifest_path required for uploaded scans" }, 400);
+    }
+    if (status === "uploaded") {
+      const manifestPath = typeof body.manifest_path === "string" ? body.manifest_path : session.manifest_path;
+      const expectedPrefix = typeof session.upload_prefix === "string" ? session.upload_prefix : `${user.id}/${sessionId}`;
+      if (typeof manifestPath !== "string" || !manifestPath.startsWith(`${expectedPrefix}/`)) {
+        return json({ error: "manifest_path_outside_session_prefix", expected_prefix: expectedPrefix }, 400);
+      }
+      const captureMetadata = objectOrEmpty(body.capture_metadata);
+      const keyframeCount = numberFromRecord(captureMetadata, "frame_count") ?? numberFromRecord(captureMetadata, "keyframe_count");
+      if (keyframeCount === null) {
+        return json({ error: "missing_keyframe_count", minimum: 8 }, 400);
+      }
+      if (keyframeCount < 8) {
+        return json({ error: "too_few_keyframes", keyframe_count: keyframeCount, minimum: 8 }, 400);
+      }
+      const uploadAnchors = Array.isArray(body.anchors) ? body.anchors : session.anchors;
+      const alignableAnchorCount = countAlignableAnchors(uploadAnchors);
+      if (alignableAnchorCount < 2) {
+        return json({
+          error: "too_few_aligned_anchors",
+          message: "Uploaded scans require at least 2 anchors with both mapLngLat and camera imagePoint or arLocal evidence.",
+          alignable_anchor_count: alignableAnchorCount,
+        }, 400);
+      }
+      const anchorSpreadM = anchorSpreadMeters(uploadAnchors);
+      if (anchorSpreadM < 3) {
+        return json({
+          error: "weak_anchor_spread",
+          message: "Uploaded scans require alignable anchors that are clearly separated on the map.",
+          anchor_spread_m: Number(anchorSpreadM.toFixed(2)),
+          minimum: 3,
+        }, 400);
+      }
     }
     if (status === "ready") {
       const issues = depthModelIssues(resultJson);

@@ -92,7 +92,7 @@
   .mobile-scan-shell {
     min-height: 100svh;
     padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(12px, env(safe-area-inset-bottom, 0px));
-    grid-template-rows: auto minmax(320px, 1fr) auto auto auto auto;
+    grid-template-rows: auto auto minmax(320px, 1fr) auto auto auto auto;
   }
   .mobile-scan-header {
     grid-template-columns: 40px minmax(0, 1fr);
@@ -104,6 +104,12 @@
   .mobile-scan-camera {
     min-height: 52svh;
     border-radius: 22px;
+  }
+  .mobile-scan-map {
+    grid-template-columns: 1fr;
+  }
+  .mobile-scan-map svg {
+    height: 94px;
   }
   .mobile-scan-hud {
     grid-template-columns: 1fr;
