@@ -126,11 +126,11 @@ describe("gardenDepth", () => {
     expect(inspectScanManifest(valid).ready).toBe(true);
     expect(countAlignableAnchors(valid.anchors)).toBe(2);
     expect(anchorSpreadMeters(valid.anchors)).toBeGreaterThan(3);
-    expect(validateScanManifest({ ...valid, anchors: [] })).toContain("too_few_anchors");
+    expect(validateScanManifest({ ...valid, anchors: [] })).toContain("route_or_anchors_required");
     expect(validateScanManifest({
       ...valid,
       anchors: valid.anchors.map((anchor) => ({ id: anchor.id, mapLngLat: anchor.mapLngLat, confidence: anchor.confidence })),
-    })).toContain("too_few_aligned_anchors");
+    })).toContain("route_or_anchors_required");
     expect(validateScanManifest({
       ...valid,
       anchors: [

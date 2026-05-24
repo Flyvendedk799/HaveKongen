@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Camera, CheckCircle2, CircleDot, Compass, UploadCloud, Video } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, CircleDot, Footprints, MapPinned, UploadCloud, Video } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,9 +14,11 @@ import {
   inspectScanManifest,
   MIN_ALIGNED_ANCHORS,
   MIN_ANCHOR_SPREAD_M,
+  MIN_ROUTE_STEPS,
   MIN_SCAN_KEYFRAMES,
   RECOMMENDED_ALIGNED_ANCHORS,
   RECOMMENDED_ANCHOR_SPREAD_M,
+  RECOMMENDED_ROUTE_STEPS,
   RECOMMENDED_SCAN_KEYFRAMES,
   scanActionHint,
   scanManifestToJson,
@@ -24,6 +26,7 @@ import {
   scanStatusLabel,
   type GardenScanAnchorObservation,
   type GardenScanManifest,
+  type GardenScanRouteObservation,
   type GardenScanSession,
 } from "@/lib/gardenScan";
 
@@ -35,7 +38,7 @@ type FrameCapture = {
   capturedAt: string;
   width: number;
   height: number;
-  source: "auto" | "manual" | "anchor";
+  source: "auto" | "manual" | "anchor" | "route";
 };
 
 type MotionSample = {
@@ -63,6 +66,13 @@ type AnchorMapFrame = {
   areaM2?: number | null;
 };
 
+type RouteStep = {
+  id: string;
+  label: string;
+  shortLabel: string;
+  instruction: string;
+};
+
 const ANCHOR_PRESETS: AnchorKind[] = [
   "house_corner",
   "terrace_corner",
@@ -78,6 +88,33 @@ const anchorLabels: Record<NonNullable<GardenScanAnchorObservation["kind"]>, str
   boundary_corner: "Skel",
   manual: "Anker",
 };
+
+const ROUTE_STEPS: RouteStep[] = [
+  {
+    id: "start_near_house",
+    label: "Start ved huset eller terrassen",
+    shortLabel: "Start",
+    instruction: "Stå ved huset eller terrassen. Peg kameraet mod midten af haven og begynd langsomt.",
+  },
+  {
+    id: "left_edge",
+    label: "Gå langs venstre kant",
+    shortLabel: "Venstre kant",
+    instruction: "Gå langs den ene side af plænen. Hold midten af haven i billedet hele tiden.",
+  },
+  {
+    id: "far_end",
+    label: "Dæk den fjerneste ende",
+    shortLabel: "Fjern ende",
+    instruction: "Stop ved den fjerneste ende. Panorer langsomt fra venstre mod højre.",
+  },
+  {
+    id: "right_edge_return",
+    label: "Gå tilbage langs modsatte kant",
+    shortLabel: "Tilbage",
+    instruction: "Gå tilbage langs den anden side. Hold træer, hegn og skure i kanten af billedet.",
+  },
+];
 
 type MotionPermissionCtor = typeof DeviceMotionEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
@@ -173,6 +210,27 @@ function readMapFrame(metadata: unknown): AnchorMapFrame | null {
   };
 }
 
+function readRouteProgress(metadata: unknown): GardenScanRouteObservation[] {
+  if (!isRecord(metadata) || !Array.isArray(metadata.route_steps)) return [];
+  const validStepIds = new Set(ROUTE_STEPS.map((step) => step.id));
+  return metadata.route_steps
+    .filter(isRecord)
+    .map((row): GardenScanRouteObservation | null => {
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!validStepIds.has(id)) return null;
+      const routeStep = ROUTE_STEPS.find((step) => step.id === id);
+      return {
+        id,
+        label: typeof row.label === "string" ? row.label : routeStep?.label ?? id,
+        completedAt: typeof row.completedAt === "string" ? row.completedAt : new Date().toISOString(),
+        captureSeconds: typeof row.captureSeconds === "number" ? row.captureSeconds : null,
+        evidenceFrameId: typeof row.evidenceFrameId === "string" ? row.evidenceFrameId : null,
+      };
+    })
+    .filter((row): row is GardenScanRouteObservation => Boolean(row))
+    .slice(0, ROUTE_STEPS.length);
+}
+
 function boundsForMap(frame: AnchorMapFrame | null, targets: AnchorTarget[]) {
   const points = [
     ...(frame?.localBoundary ?? []),
@@ -207,36 +265,72 @@ function pathFromRing(ring: LocalPoint[], bounds: NonNullable<ReturnType<typeof 
   }).join(" ");
 }
 
-function MobileAnchorMap({
+function routePointsForBounds(bounds: NonNullable<ReturnType<typeof boundsForMap>>) {
+  const insetX = bounds.width * 0.18;
+  const insetZ = bounds.depth * 0.16;
+  const midX = (bounds.minX + bounds.maxX) / 2;
+  const midZ = (bounds.minZ + bounds.maxZ) / 2;
+  return [
+    { x: midX, z: bounds.maxZ - insetZ },
+    { x: bounds.minX + insetX, z: midZ },
+    { x: midX, z: bounds.minZ + insetZ },
+    { x: bounds.maxX - insetX, z: midZ },
+  ] satisfies LocalPoint[];
+}
+
+function MobileRouteMap({
   frame,
   targets,
   selectedAnchorId,
   anchors,
+  routeSteps,
+  routeProgress,
   onSelect,
 }: {
   frame: AnchorMapFrame | null;
   targets: AnchorTarget[];
   selectedAnchorId: string | null;
   anchors: GardenScanAnchorObservation[];
+  routeSteps: RouteStep[];
+  routeProgress: GardenScanRouteObservation[];
   onSelect: (id: string) => void;
 }) {
   const bounds = boundsForMap(frame, targets);
   const doneIds = new Set(anchors.map((anchor) => anchor.id));
-  if (!bounds || !targets.some((target) => target.local)) return null;
+  const completedRouteIds = new Set(routeProgress.map((step) => step.id));
+  if (!bounds) return null;
+  const routePoints = routePointsForBounds(bounds);
+  const routePolyline = routePoints.map((point) => {
+    const mapped = mapPoint(point, bounds);
+    return `${mapped.x.toFixed(2)},${mapped.y.toFixed(2)}`;
+  }).join(" ");
 
   return (
-    <div className="mobile-scan-map" aria-label="Kortankre">
+    <div className="mobile-scan-map" aria-label="Guidet haverute">
       <div>
-        <span>Kortankre</span>
-        <strong>{doneIds.size}/{Math.min(4, Math.max(2, targets.length))}</strong>
+        <span>Rute</span>
+        <strong>{Math.min(routeProgress.length, MIN_ROUTE_STEPS)}/{MIN_ROUTE_STEPS}</strong>
       </div>
-      <svg viewBox="0 0 100 100" role="img" aria-label="Skitse af have og ankerpunkter">
+      <svg viewBox="0 0 100 100" role="img" aria-label="Skitse af have, gangrute og manuelle ankerpunkter">
         {frame?.localBoundary.length ? (
           <polygon className="mobile-scan-map__boundary" points={pathFromRing(frame.localBoundary, bounds)} />
         ) : null}
         {frame?.localLawnRings.map((ring, index) => (
           <polygon className="mobile-scan-map__lawn" points={pathFromRing(ring, bounds)} key={`lawn-${index}`} />
         ))}
+        <polyline className="mobile-scan-map__route" points={routePolyline} />
+        {routeSteps.map((step, index) => {
+          const point = routePoints[index];
+          if (!point) return null;
+          const mapped = mapPoint(point, bounds);
+          const done = completedRouteIds.has(step.id);
+          return (
+            <g key={step.id} className={`mobile-scan-map__route-step ${done ? "is-done" : ""}`}>
+              <circle cx={mapped.x} cy={mapped.y} r={done ? 4.8 : 4.2} />
+              <text x={mapped.x} y={mapped.y + 1.5}>{index + 1}</text>
+            </g>
+          );
+        })}
         {targets.map((target, index) => {
           if (!target.local) return null;
           const point = mapPoint(target.local, bounds);
@@ -254,7 +348,7 @@ function MobileAnchorMap({
               }}
               aria-label={target.label}
             >
-              <circle cx={point.x} cy={point.y} r={selected ? 4.8 : 4} />
+              <circle cx={point.x} cy={point.y} r={selected ? 3.7 : 3.1} />
               <text x={point.x} y={point.y + 1.5}>{index + 1}</text>
             </g>
           );
@@ -283,58 +377,60 @@ export default function GardenMobileScan() {
   const [gardenName, setGardenName] = useState("Have");
   const [frames, setFrames] = useState<FrameCapture[]>([]);
   const [anchors, setAnchors] = useState<GardenScanAnchorObservation[]>([]);
+  const [routeProgress, setRouteProgress] = useState<GardenScanRouteObservation[]>([]);
   const [anchorTargets, setAnchorTargets] = useState<AnchorTarget[]>([]);
   const [mapFrame, setMapFrame] = useState<AnchorMapFrame | null>(null);
   const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
+  const [manualAnchorMode, setManualAnchorMode] = useState(false);
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraLive, setCameraLive] = useState(false);
   const [captureSeconds, setCaptureSeconds] = useState(0);
 
   const uploadPrefix = session?.upload_prefix ?? (user ? `${user.id}/${sessionId}` : "");
-  const uploadTargets = useMemo(() => buildUploadTargets(uploadPrefix || "pending"), [uploadPrefix]);
   const alignedAnchorCount = countAlignableAnchors(anchors);
   const anchorSpreadM = anchorSpreadMeters(anchors);
   const requiredFramesReady = frames.length >= MIN_SCAN_KEYFRAMES;
+  const routeReady = routeProgress.length >= MIN_ROUTE_STEPS;
   const anchorCountReady = alignedAnchorCount >= MIN_ALIGNED_ANCHORS;
   const anchorSpreadReady = alignedAnchorCount < MIN_ALIGNED_ANCHORS || anchorSpreadM >= MIN_ANCHOR_SPREAD_M;
-  const anchorsReady = anchorCountReady && anchorSpreadReady;
-  const readyToUpload = Boolean(session && uploadPrefix && requiredFramesReady && anchorsReady);
+  const manualAnchorsStrong = anchorCountReady && anchorSpreadReady;
+  const readyToUpload = Boolean(session && uploadPrefix && requiredFramesReady && routeReady);
   const selectedAnchor = anchorTargets.find((candidate) => candidate.id === selectedAnchorId) ?? null;
   const hasMapAnchorTargets = anchorTargets.some((target) => Boolean(target.mapLngLat && target.local));
   const currentStatus = session?.status ?? "created";
-  const uploadBlockedReason = !requiredFramesReady
-    ? `${Math.max(0, MIN_SCAN_KEYFRAMES - frames.length)} keyframes mangler`
-    : !anchorCountReady
-      ? `${Math.max(0, MIN_ALIGNED_ANCHORS - alignedAnchorCount)} kortankre mangler`
-      : !anchorSpreadReady
-        ? "vælg ankre længere fra hinanden"
+  const currentRouteStep = ROUTE_STEPS.find((step) => !routeProgress.some((done) => done.id === step.id)) ?? null;
+  const routeProgressLabel = `${Math.min(routeProgress.length, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS}`;
+  const uploadBlockedReason = !routeReady
+    ? `${Math.max(0, MIN_ROUTE_STEPS - routeProgress.length)} rutepunkter mangler`
+    : !requiredFramesReady
+      ? `${Math.max(0, MIN_SCAN_KEYFRAMES - frames.length)} keyframes mangler`
       : "";
-  const readinessHint = !requiredFramesReady
-    ? "Gå langsomt rundt mens kameraet selv samler keyframes."
-    : !anchorCountReady
-      ? "Tryk mindst to kortankre i kameraet."
-      : !anchorSpreadReady
-        ? "Vælg to ankre med mere afstand, fx hushjørne og skur/låge."
+  const readinessHint = !routeReady
+    ? currentRouteStep?.instruction ?? "Følg ruten og hold kameraet peget mod havens midte."
+    : !requiredFramesReady
+      ? "Ruten er dækket. Gå lidt langsommere videre, så kameraet får flere vinkler."
+      : !manualAnchorsStrong
+        ? "Klar til upload. Manuelle ankre er valgfrie, men giver bedre alignment på kortet."
         : anchorSpreadM < RECOMMENDED_ANCHOR_SPREAD_M
-          ? "Klar til upload. Et ekstra anker længere væk giver bedre alignment."
-          : "Klar til upload med stærkere alignment-grundlag.";
+          ? "Klar til upload. Et ekstra anker længere væk kan styrke alignment."
+          : "Klar til upload med stærk rute og manuelle ankre.";
   const selectedAnchorIndex = selectedAnchor ? anchorTargets.findIndex((target) => target.id === selectedAnchor.id) : -1;
   const captureGuide = state === "ready"
-    ? "Start kameraet, vælg et kortanker og peg på samme punkt i haven."
-    : !anchorCountReady
-      ? "Tryk på det valgte punkt i kamerabilledet. Brug tydelige hjørner."
-      : !requiredFramesReady
-        ? "Gå langsomt videre, så kameraet samler flere vinkler automatisk."
-        : !anchorSpreadReady
-          ? "Vælg et anker længere væk, så modellen ikke drejer forkert."
-          : "Scan er klar til upload.";
+    ? "Start kameraet. Havemåler guider dig rundt, mens du holder midten af haven i billedet."
+    : manualAnchorMode && selectedAnchor
+      ? `Manuelt anker: tryk samme faste punkt i kameraet for ${selectedAnchor.label}.`
+      : !routeReady
+        ? currentRouteStep?.instruction ?? "Følg ruten rundt om haven."
+        : !requiredFramesReady
+          ? "Bliv ved med langsom bevægelse, så kameraet samler flere vinkler automatisk."
+          : "Scan er klar til upload. Manuelle ankre er kun et plus.";
   const footerHint = state === "uploaded"
     ? "Vi bygger 3D-modellen og viser den på haven, når den er klar."
     : state === "camera"
       ? readinessHint
-      : state === "ready"
-        ? "Start kameraet, marker 2-4 kortankre og upload scanningen."
+    : state === "ready"
+        ? "Start kameraet og gå den guidede rute med kameraet peget mod havens midte."
         : scanActionHint(currentStatus);
 
   useEffect(() => {
@@ -372,6 +468,7 @@ export default function GardenMobileScan() {
       setAnchorTargets(nextTargets);
       setMapFrame(readMapFrame(sessionRow.capture_metadata));
       if (Array.isArray(sessionRow.anchors)) setAnchors(sessionRow.anchors as GardenScanAnchorObservation[]);
+      setRouteProgress(readRouteProgress(sessionRow.capture_metadata));
       setSelectedAnchorId(nextTargets[0]?.id ?? null);
       setState(["uploaded", "processing", "ready"].includes(sessionRow.status) ? "uploaded" : "ready");
     }
@@ -569,6 +666,34 @@ export default function GardenMobileScan() {
     setSelectedAnchorId(nextTarget?.id ?? target.id);
   }
 
+  async function completeCurrentRouteStep() {
+    if (state !== "camera") return;
+    if (!currentRouteStep) {
+      toast.success("Ruten er allerede dækket");
+      return;
+    }
+    const frame = await captureFrame("route");
+    if (!frame && !frames.length) {
+      toast("Kameraet samler første billede", {
+        description: "Hold telefonen roligt mod havens midte et øjeblik.",
+      });
+      return;
+    }
+    setRouteProgress((prev) => {
+      if (prev.some((step) => step.id === currentRouteStep.id)) return prev;
+      return [
+        ...prev,
+        {
+          id: currentRouteStep.id,
+          label: currentRouteStep.label,
+          completedAt: new Date().toISOString(),
+          captureSeconds,
+          evidenceFrameId: frame?.id ?? frames.at(-1)?.id ?? null,
+        },
+      ];
+    });
+  }
+
   function imagePointFromEvent(event: PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     return {
@@ -579,6 +704,7 @@ export default function GardenMobileScan() {
 
   async function handleCameraTap(event: PointerEvent<HTMLDivElement>) {
     if (state !== "camera") return;
+    if (!manualAnchorMode) return;
     if (!selectedAnchor) {
       toast("Vælg et anker først");
       return;
@@ -640,10 +766,21 @@ export default function GardenMobileScan() {
         frame_interval_seconds: 2.8,
         anchor_count: anchors.length,
         aligned_anchor_count: alignedAnchorCount,
-        coverage_score: Math.min(0.92, 0.2 + frames.length * 0.055 + anchors.length * 0.08),
+        manual_anchor_count: alignedAnchorCount,
+        route_guided: true,
+        route_step_count: ROUTE_STEPS.length,
+        completed_route_steps: routeProgress.length,
+        route_progress: Number(Math.min(1, routeProgress.length / MIN_ROUTE_STEPS).toFixed(2)),
+        coverage_score: Math.min(0.96, 0.18 + frames.length * 0.045 + routeProgress.length * 0.12 + Math.min(alignedAnchorCount, RECOMMENDED_ALIGNED_ANCHORS) * 0.04),
         low_light: null,
       },
       anchors,
+      route: {
+        mode: "guided_center_route",
+        camera_target: "garden_center",
+        required_step_count: MIN_ROUTE_STEPS,
+        steps: routeProgress,
+      },
       files: {
         manifest: byKind.manifest,
         tracking: byKind.tracking,
@@ -680,14 +817,20 @@ export default function GardenMobileScan() {
       anchor_targets: anchorTargets,
       capture_quality: {
         keyframe_count: frames.length,
+        route_guided: true,
+        completed_route_steps: routeProgress.length,
+        required_route_steps: MIN_ROUTE_STEPS,
+        route_progress: Number(Math.min(1, routeProgress.length / MIN_ROUTE_STEPS).toFixed(2)),
         aligned_anchor_count: alignedAnchorCount,
         anchor_spread_m: anchorSpreadM,
         capture_seconds: manifest.capture.duration_seconds,
         recommended_keyframes: RECOMMENDED_SCAN_KEYFRAMES,
+        recommended_route_steps: RECOMMENDED_ROUTE_STEPS,
         recommended_anchors: RECOMMENDED_ALIGNED_ANCHORS,
         recommended_anchor_spread_m: RECOMMENDED_ANCHOR_SPREAD_M,
       },
       device_motion_samples: motionSamplesRef.current,
+      route_steps: routeProgress,
       anchors,
     };
 
@@ -717,6 +860,13 @@ export default function GardenMobileScan() {
             client: "mobile_web",
             capture_seconds: manifest.capture.duration_seconds,
             frame_count: frames.length,
+            keyframe_count: frames.length,
+            capture_mode: "guided_center_route",
+            route_guided: true,
+            route_step_count: ROUTE_STEPS.length,
+            completed_route_steps: routeProgress.length,
+            route_progress: manifest.capture.route_progress,
+            route_steps: routeProgress,
             anchor_count: anchors.length,
             aligned_anchor_count: alignedAnchorCount,
             anchor_spread_m: anchorSpreadM,
@@ -760,30 +910,32 @@ export default function GardenMobileScan() {
         {state !== "loading" && state !== "error" && state !== "uploaded" && (
           <div className="mobile-scan-flow" aria-label="Scantrin">
             <span className={state === "ready" ? "is-active" : "is-done"}><b>1</b>Kamera</span>
-            <span className={anchorCountReady ? "is-done" : state === "camera" ? "is-active" : ""}><b>2</b>Ankre</span>
-            <span className={requiredFramesReady ? "is-done" : state === "camera" && anchorCountReady ? "is-active" : ""}><b>3</b>Vinkler</span>
+            <span className={routeReady ? "is-done" : state === "camera" ? "is-active" : ""}><b>2</b>Rute</span>
+            <span className={requiredFramesReady ? "is-done" : state === "camera" && routeReady ? "is-active" : ""}><b>3</b>Vinkler</span>
             <span className={readyToUpload ? "is-active" : ""}><b>4</b>Upload</span>
           </div>
         )}
 
         {state !== "uploaded" && (
-          <MobileAnchorMap
+          <MobileRouteMap
             frame={mapFrame}
             targets={anchorTargets}
             selectedAnchorId={selectedAnchorId}
             anchors={anchors}
+            routeSteps={ROUTE_STEPS}
+            routeProgress={routeProgress}
             onSelect={setSelectedAnchorId}
           />
         )}
 
         {state !== "loading" && state !== "error" && state !== "uploaded" && (
           <div className="mobile-scan-guide">
-            <strong>{state === "ready" ? "Klar til kamera" : selectedAnchor ? `Næste anker: ${selectedAnchor.label}` : "Vælg et anker"}</strong>
+            <strong>{state === "ready" ? "Klar til rutescan" : manualAnchorMode && selectedAnchor ? `Manuelt anker: ${selectedAnchor.label}` : currentRouteStep ? `Rute: ${currentRouteStep.shortLabel}` : "Rute dækket"}</strong>
             <span>{captureGuide}</span>
           </div>
         )}
 
-        <div className={`mobile-scan-camera ${state === "camera" ? "is-marking" : ""}`} onPointerDown={(event) => { void handleCameraTap(event); }}>
+        <div className={`mobile-scan-camera ${state === "camera" && manualAnchorMode ? "is-marking" : ""}`} onPointerDown={(event) => { void handleCameraTap(event); }}>
           <video
             ref={videoRef}
             className={cameraLive ? "is-live" : ""}
@@ -809,26 +961,26 @@ export default function GardenMobileScan() {
           <canvas ref={canvasRef} aria-hidden="true" />
           <div className="mobile-scan-hud">
             <span><Camera size={13} /> {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} auto</span>
-            <span><CircleDot size={13} /> {alignedAnchorCount}/{MIN_ALIGNED_ANCHORS} ankre</span>
-            <span><Compass size={13} /> {anchorSpreadM ? `${Math.round(anchorSpreadM)}m` : `${captureSeconds}s`}</span>
+            <span><Footprints size={13} /> {routeProgressLabel} rute</span>
+            <span><CircleDot size={13} /> {alignedAnchorCount} ankre</span>
           </div>
-          {state === "camera" && selectedAnchor && (
+          {state === "camera" && manualAnchorMode && selectedAnchor && (
             <div className="mobile-scan-target-hint">
               Tryk samme punkt i kameraet: {selectedAnchorIndex + 1}. {selectedAnchor.label}
+            </div>
+          )}
+          {state === "camera" && !manualAnchorMode && currentRouteStep && (
+            <div className="mobile-scan-target-hint">
+              {currentRouteStep.shortLabel}: peg mod havens midte
             </div>
           )}
         </div>
 
         {cameraError && <p className="mobile-scan-error">{cameraError}</p>}
-        {state !== "loading" && state !== "uploaded" && !hasMapAnchorTargets && (
-          <p className="mobile-scan-error">
-            Scan-sessionen mangler kortankre. Start en ny 3D-scan fra Havemåler, så kameraet kan alignes til plænen.
-          </p>
-        )}
 
         <div className="mobile-scan-actions">
           {state === "ready" && (
-            <button type="button" className="btn btn-primary" onClick={startCamera} disabled={!hasMapAnchorTargets}>
+            <button type="button" className="btn btn-primary" onClick={startCamera}>
               <Video size={16} /> Start kamera
             </button>
           )}
@@ -836,6 +988,12 @@ export default function GardenMobileScan() {
             <>
               <button type="button" className={readyToUpload ? "btn btn-primary" : "btn btn-ghost"} onClick={() => void handleUploadAction()}>
                 <UploadCloud size={16} /> {readyToUpload ? "Upload scan" : uploadBlockedReason || "Tjek scan"}
+              </button>
+              <button type="button" className={!routeReady ? "btn btn-primary" : "btn btn-ghost"} onClick={() => void completeCurrentRouteStep()}>
+                <Footprints size={16} /> {currentRouteStep ? `Næste: ${currentRouteStep.shortLabel}` : "Rute færdig"}
+              </button>
+              <button type="button" className={manualAnchorMode ? "btn btn-primary" : "btn btn-ghost"} onClick={() => setManualAnchorMode((value) => !value)} disabled={!hasMapAnchorTargets}>
+                <MapPinned size={16} /> {manualAnchorMode ? "Luk anker" : "Manuelt anker"}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => void captureFrame()}>
                 <Camera size={16} /> Ekstra keyframe
@@ -858,11 +1016,24 @@ export default function GardenMobileScan() {
           <div className="mobile-scan-anchors">
             <p>{readinessHint}</p>
             <div className="mobile-scan-readiness" aria-live="polite">
+              <span className={routeReady ? "is-done" : ""}><Footprints size={14} /> {routeProgressLabel} rute</span>
               <span className={requiredFramesReady ? "is-done" : ""}><CheckCircle2 size={14} /> {Math.min(frames.length, MIN_SCAN_KEYFRAMES)}/{MIN_SCAN_KEYFRAMES} billeder</span>
-              <span className={anchorCountReady ? "is-done" : ""}><CircleDot size={14} /> {alignedAnchorCount}/{MIN_ALIGNED_ANCHORS} ankre</span>
-              <span className={anchorSpreadReady ? "is-done" : ""}><Compass size={14} /> {Math.round(anchorSpreadM)}m afstand</span>
+              <span className={manualAnchorsStrong ? "is-done" : ""}><CircleDot size={14} /> {alignedAnchorCount} manuelle</span>
             </div>
-            {anchorTargets.map((target, index) => (
+            {ROUTE_STEPS.map((step, index) => (
+              <button
+                type="button"
+                key={step.id}
+                className={`${routeProgress.some((done) => done.id === step.id) ? "is-done" : ""} ${currentRouteStep?.id === step.id ? "is-current" : ""}`}
+                onClick={() => {
+                  if (currentRouteStep?.id === step.id) void completeCurrentRouteStep();
+                }}
+              >
+                <b>{index + 1}</b>
+                <span>{step.shortLabel}</span>
+              </button>
+            ))}
+            {manualAnchorMode && anchorTargets.map((target, index) => (
               <button
                 type="button"
                 key={target.id}
@@ -884,7 +1055,7 @@ export default function GardenMobileScan() {
 
         <footer className="mobile-scan-footer">
           <span>{footerHint}</span>
-          <small>{frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} billeder · {alignedAnchorCount}/{RECOMMENDED_ALIGNED_ANCHORS} ankre · {Math.round(anchorSpreadM)}m ankerafstand</small>
+          <small>{routeProgressLabel} rute · {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} billeder · {alignedAnchorCount}/{RECOMMENDED_ALIGNED_ANCHORS} manuelle ankre</small>
         </footer>
       </section>
     </div>

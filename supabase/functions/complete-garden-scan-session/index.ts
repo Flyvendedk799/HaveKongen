@@ -24,6 +24,10 @@ const TRANSITIONS: Record<string, string[]> = {
   failed: [],
   cancelled: [],
 };
+const MIN_SCAN_KEYFRAMES = 8;
+const MIN_ALIGNED_ANCHORS = 2;
+const MIN_ANCHOR_SPREAD_M = 3;
+const MIN_ROUTE_STEPS = 4;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -140,6 +144,17 @@ function numberFromRecord(value: unknown, key: string) {
   return typeof next === "number" && Number.isFinite(next) ? next : null;
 }
 
+function routeReadyFromMetadata(value: unknown) {
+  const metadata = objectOrEmpty(value);
+  const routeGuided = metadata.route_guided === true || metadata.capture_mode === "guided_center_route";
+  const completedRouteSteps = numberFromRecord(metadata, "completed_route_steps") ?? 0;
+  return {
+    routeGuided,
+    completedRouteSteps,
+    ready: routeGuided && completedRouteSteps >= MIN_ROUTE_STEPS,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -181,6 +196,7 @@ Deno.serve(async (req) => {
     }
 
     const warnings = Array.isArray(body.warnings) ? body.warnings.map(String).slice(0, 24) : [];
+    const serverWarnings = [...warnings];
     const resultJson = body.result_json && typeof body.result_json === "object" ? body.result_json : null;
     const confidence = typeof body.confidence === "number" ? Math.max(0, Math.min(1, body.confidence)) : null;
     const now = new Date().toISOString();
@@ -198,26 +214,35 @@ Deno.serve(async (req) => {
       if (keyframeCount === null) {
         return json({ error: "missing_keyframe_count", minimum: 8 }, 400);
       }
-      if (keyframeCount < 8) {
-        return json({ error: "too_few_keyframes", keyframe_count: keyframeCount, minimum: 8 }, 400);
+      if (keyframeCount < MIN_SCAN_KEYFRAMES) {
+        return json({ error: "too_few_keyframes", keyframe_count: keyframeCount, minimum: MIN_SCAN_KEYFRAMES }, 400);
       }
+      const routeReadiness = routeReadyFromMetadata(captureMetadata);
       const uploadAnchors = Array.isArray(body.anchors) ? body.anchors : session.anchors;
       const alignableAnchorCount = countAlignableAnchors(uploadAnchors);
-      if (alignableAnchorCount < 2) {
+      if (alignableAnchorCount < MIN_ALIGNED_ANCHORS && !routeReadiness.ready) {
         return json({
-          error: "too_few_aligned_anchors",
-          message: "Uploaded scans require at least 2 anchors with both mapLngLat and camera imagePoint or arLocal evidence.",
+          error: "route_or_anchors_required",
+          message: `Uploaded scans require either ${MIN_ROUTE_STEPS} guided route steps or ${MIN_ALIGNED_ANCHORS} manual anchors with both mapLngLat and camera imagePoint or arLocal evidence.`,
           alignable_anchor_count: alignableAnchorCount,
+          completed_route_steps: routeReadiness.completedRouteSteps,
+          minimum_route_steps: MIN_ROUTE_STEPS,
         }, 400);
       }
-      const anchorSpreadM = anchorSpreadMeters(uploadAnchors);
-      if (anchorSpreadM < 3) {
+      if (alignableAnchorCount < MIN_ALIGNED_ANCHORS) {
+        serverWarnings.push("manual_anchors_missing");
+      }
+      const anchorSpreadM = alignableAnchorCount >= MIN_ALIGNED_ANCHORS ? anchorSpreadMeters(uploadAnchors) : 0;
+      if (alignableAnchorCount >= MIN_ALIGNED_ANCHORS && anchorSpreadM < MIN_ANCHOR_SPREAD_M && !routeReadiness.ready) {
         return json({
           error: "weak_anchor_spread",
           message: "Uploaded scans require alignable anchors that are clearly separated on the map.",
           anchor_spread_m: Number(anchorSpreadM.toFixed(2)),
-          minimum: 3,
+          minimum: MIN_ANCHOR_SPREAD_M,
         }, 400);
+      }
+      if (alignableAnchorCount >= MIN_ALIGNED_ANCHORS && anchorSpreadM < MIN_ANCHOR_SPREAD_M) {
+        serverWarnings.push("weak_anchor_spread");
       }
     }
     if (status === "ready") {
@@ -230,7 +255,7 @@ Deno.serve(async (req) => {
     const statusHistory = Array.isArray(session.status_history) ? session.status_history : [];
     const updatePayload: Record<string, unknown> = {
       status,
-      warnings,
+      warnings: [...new Set(serverWarnings)].slice(0, 24),
       last_status_at: now,
       status_history: [
         ...statusHistory.slice(-24),
@@ -280,7 +305,7 @@ Deno.serve(async (req) => {
         previous_status: session.status,
         status,
         confidence,
-        warnings,
+        warnings: [...new Set(serverWarnings)].slice(0, 24),
         error_code: typeof body.error_code === "string" ? body.error_code : null,
       },
     });

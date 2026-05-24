@@ -855,9 +855,37 @@
   stroke: rgba(72,108,61,0.6);
   stroke-width: 0.8;
 }
+.mobile-scan-map__route {
+  fill: none;
+  stroke: rgba(216,166,81,0.9);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 4 3;
+}
+.mobile-scan-map__route-step circle {
+  fill: #f7f2e8;
+  stroke: rgba(216,166,81,0.95);
+  stroke-width: 1.8;
+}
+.mobile-scan-map__route-step text {
+  fill: var(--forest-900);
+  font-size: 5px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.mobile-scan-map__route-step.is-done circle {
+  fill: #4f8a54;
+  stroke: #ffffff;
+}
+.mobile-scan-map__route-step.is-done text {
+  fill: #ffffff;
+}
 .mobile-scan-map__anchor {
   cursor: pointer;
   outline: none;
+  opacity: .78;
 }
 .mobile-scan-map__anchor circle {
   fill: #f7f2e8;
@@ -1087,6 +1115,10 @@
   border-color: rgba(216,166,81,0.9);
   background: rgba(255,247,225,0.94);
   box-shadow: 0 0 0 2px rgba(216,166,81,0.16);
+}
+.mobile-scan-anchors button.is-current {
+  border-color: rgba(216,166,81,0.9);
+  background: rgba(255,247,225,0.94);
 }
 .mobile-scan-anchors button.is-done {
   border-color: rgba(79,138,84,0.38);

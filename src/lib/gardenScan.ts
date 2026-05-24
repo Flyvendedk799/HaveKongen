@@ -34,6 +34,14 @@ export type GardenScanAnchorObservation = {
   evidenceFrameIds?: string[];
 };
 
+export type GardenScanRouteObservation = {
+  id: string;
+  label: string;
+  completedAt: string;
+  captureSeconds?: number | null;
+  evidenceFrameId?: string | null;
+};
+
 export type GardenScanManifest = {
   version: 1;
   session_id: string;
@@ -58,10 +66,21 @@ export type GardenScanManifest = {
     frame_interval_seconds?: number | null;
     anchor_count?: number | null;
     aligned_anchor_count?: number | null;
+    manual_anchor_count?: number | null;
+    route_guided?: boolean | null;
+    route_step_count?: number | null;
+    completed_route_steps?: number | null;
+    route_progress?: number | null;
     coverage_score?: number | null;
     low_light?: boolean | null;
   };
   anchors: GardenScanAnchorObservation[];
+  route?: {
+    mode: "guided_center_route";
+    camera_target: "garden_center";
+    required_step_count: number;
+    steps: GardenScanRouteObservation[];
+  };
   files: {
     manifest?: string | null;
     tracking: string;
@@ -79,6 +98,8 @@ export type PipelineIssue = {
 
 export const MIN_SCAN_KEYFRAMES = 8;
 export const RECOMMENDED_SCAN_KEYFRAMES = 18;
+export const MIN_ROUTE_STEPS = 4;
+export const RECOMMENDED_ROUTE_STEPS = 4;
 export const MIN_ALIGNED_ANCHORS = 2;
 export const RECOMMENDED_ALIGNED_ANCHORS = 4;
 export const MIN_ANCHOR_SPREAD_M = 3;
@@ -116,7 +137,7 @@ export function scanStatusLabel(status: string) {
 }
 
 export function scanActionHint(status: string) {
-  if (status === "created") return "Åbn mobilcapture og vælg 2-4 tydelige ankre.";
+  if (status === "created") return "Åbn mobilcapture og gå den guidede rute med kameraet peget mod havens midte.";
   if (status === "capturing") return "Hold langsom gang, god belysning og overlap mellem billeder.";
   if (status === "uploaded") return "Scandata er klar til workerens rekonstruktion.";
   if (status === "processing") return "Worker bygger semantisk 3D-model og kvalitetstjekker alignment.";
@@ -257,6 +278,12 @@ export function anchorSpreadMeters(value: unknown) {
   return Number(best.toFixed(2));
 }
 
+function routeObservationCount(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return 0;
+  const route = (value as Partial<GardenScanManifest>).route;
+  return Array.isArray(route?.steps) ? route.steps.filter((step) => step && typeof step.id === "string").length : 0;
+}
+
 export function inspectScanManifest(value: unknown): { manifest: GardenScanManifest | null; issues: PipelineIssue[]; ready: boolean } {
   const issues: PipelineIssue[] = [];
   if (!value || typeof value !== "object") {
@@ -292,18 +319,32 @@ export function inspectScanManifest(value: unknown): { manifest: GardenScanManif
       issues.push({ severity: "warning", code: "low_light", message: "Lavt lys reducerer objekt- og dybdekvalitet." });
     }
   }
+  const capture = row.capture;
+  const completedRouteSteps = typeof capture?.completed_route_steps === "number"
+    ? capture.completed_route_steps
+    : routeObservationCount(row);
+  const routeGuided = capture?.route_guided === true || row.route?.mode === "guided_center_route";
+  const routeReady = routeGuided && completedRouteSteps >= MIN_ROUTE_STEPS;
+  if (!routeGuided) {
+    issues.push({ severity: "warning", code: "route_guidance_missing", message: "Guidet rute mangler i manifestet." });
+  } else if (completedRouteSteps < MIN_ROUTE_STEPS) {
+    issues.push({ severity: "error", code: "route_incomplete", message: `Gennemfør mindst ${MIN_ROUTE_STEPS} rutepunkter med kameraet peget mod havens midte.` });
+  }
+
   const alignableAnchorCount = countAlignableAnchors(row.anchors);
-  if (!Array.isArray(row.anchors) || row.anchors.length < MIN_ALIGNED_ANCHORS) {
-    issues.push({ severity: "error", code: "too_few_anchors", message: "Mindst 2 ankre er nødvendige for alignment." });
-  } else if (alignableAnchorCount < MIN_ALIGNED_ANCHORS) {
-    issues.push({ severity: "error", code: "too_few_aligned_anchors", message: "Mindst 2 ankre skal have både kortpunkt og kamerapunkt." });
+  if (alignableAnchorCount < MIN_ALIGNED_ANCHORS) {
+    if (routeReady) {
+      issues.push({ severity: "warning", code: "manual_anchors_missing", message: "Manuelle ankre mangler. Scanningen kan stadig uploades, men alignment bliver lavere sikkerhed." });
+    } else {
+      issues.push({ severity: "error", code: "route_or_anchors_required", message: "Gennemfør ruten eller tilføj mindst 2 manuelle ankre." });
+    }
   } else if (alignableAnchorCount < RECOMMENDED_ALIGNED_ANCHORS) {
     issues.push({ severity: "warning", code: "less_than_recommended_anchors", message: "4 ankre anbefales for stærkere alignment." });
   }
   if (alignableAnchorCount >= MIN_ALIGNED_ANCHORS) {
     const spreadM = anchorSpreadMeters(row.anchors);
     if (spreadM < MIN_ANCHOR_SPREAD_M) {
-      issues.push({ severity: "error", code: "weak_anchor_spread", message: "Ankre skal ligge tydeligt fra hinanden på kortet." });
+      issues.push({ severity: routeReady ? "warning" : "error", code: "weak_anchor_spread", message: "Ankre skal ligge tydeligt fra hinanden på kortet." });
     } else if (spreadM < RECOMMENDED_ANCHOR_SPREAD_M) {
       issues.push({ severity: "warning", code: "close_anchor_spread", message: "Brug gerne ankre længere fra hinanden for bedre alignment." });
     }
