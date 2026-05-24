@@ -446,7 +446,7 @@ export default function GardenCompanion() {
       ...remoteSuggestions,
       ...seasonActions,
       ...generateWeatherActions(garden.id, zones, forecasts),
-      ...generateDeviceActions(garden.id, devices),
+      ...generateDeviceActions(garden.id, devices as unknown as Parameters<typeof generateDeviceActions>[1]),
     ].filter((a) => !existingTitles.has(a.title));
   }, [actions, devices, forecasts, garden, remoteSuggestions, seasonActions, zones]);
 
