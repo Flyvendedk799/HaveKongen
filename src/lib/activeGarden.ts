@@ -12,6 +12,6 @@ export const useActiveGarden = create<State>()(
       activeGardenId: null,
       setActive: (id) => set({ activeGardenId: id }),
     }),
-    { name: "havelandet-active-garden" }
+    { name: "havekongen-active-garden" }
   )
 );

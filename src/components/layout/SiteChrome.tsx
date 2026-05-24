@@ -65,7 +65,7 @@ export function SiteNav({ onDark = true }: { onDark?: boolean }) {
     <nav className={`nav ${onDark ? "on-dark" : ""}`} id="nav">
       <Link className="nav-logo" to="/">
         <Logo />
-        Havelandet
+        Havekongen
       </Link>
       <div className="nav-links">
         <Link to="/min-have">Min have</Link>
@@ -99,7 +99,7 @@ export function AppNav({ active }: { active?: string }) {
     <nav className="app-nav">
       <Link className="nav-logo" to="/">
         <Logo />
-        Havelandet
+        Havekongen
       </Link>
       <div className="nav-links">
         {link("/min-have", "Min have", "hub")}
@@ -129,7 +129,7 @@ export function SiteFooter() {
         <div className="footer-grid">
           <div>
             <div className="footer-mark">
-              Havelandet<em>.</em>
+              Havekongen<em>.</em>
             </div>
             <p style={{ color: "rgba(237,232,223,0.6)", fontSize: 14, maxWidth: 320, lineHeight: 1.6 }}>
               Lev din have. Fra det første frø, til årets sidste blad.
@@ -156,7 +156,7 @@ export function SiteFooter() {
           <div className="footer-col">
             <h4>Os</h4>
             <ul>
-              <li><a href="#">Om Havelandet</a></li>
+              <li><a href="#">Om Havekongen</a></li>
               <li><a href="#">Kontakt</a></li>
               <li><a href="#">Presse</a></li>
               <li><a href="#">Vilkår</a></li>
@@ -164,7 +164,7 @@ export function SiteFooter() {
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 Havelandet ApS — København</span>
+          <span>© 2026 Havekongen ApS — København</span>
           <span>CVR 4488 1230 · Made in Denmark</span>
         </div>
       </div>

@@ -28,7 +28,7 @@ export function OnboardingWizard() {
 
   const steps = [
     {
-      title: "Velkommen til Havelandet 🌿",
+      title: "Velkommen til Havekongen 🌿",
       body: "Lad os få din have op at køre på 1 minut. Du kan altid skippe.",
       cta: "Kom i gang",
       next: () => setStep(1),

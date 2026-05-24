@@ -1333,11 +1333,11 @@ export default function PlantCareAI() {
     const body = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Havelandet//Plantepleje AI//DA",
+      "PRODID:-//Havekongen//Plantepleje AI//DA",
       "CALSCALE:GREGORIAN",
       ...events.flatMap((event) => [
         "BEGIN:VEVENT",
-        `UID:${escapeIcs(event.uid)}@havelandet.dk`,
+        `UID:${escapeIcs(event.uid)}@havekongen.dk`,
         `DTSTAMP:${icsDate(new Date().toISOString())}`,
         `DTSTART:${icsDate(event.dueAt)}`,
         "DURATION:PT30M",

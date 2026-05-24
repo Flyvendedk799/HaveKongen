@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const BASE_PROMPT = `Du er Havelandets Plantepleje AI — en venlig, erfaren havekonsulent for danske haveejere.
+const BASE_PROMPT = `Du er Havekongens Plantepleje AI — en venlig, erfaren havekonsulent for danske haveejere.
 
 Du hjælper med:
 - Beskæring (hvornår, hvordan, hvilke værktøjer)

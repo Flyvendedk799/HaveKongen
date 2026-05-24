@@ -29,7 +29,7 @@ function AdminSidebar() {
     <Sidebar collapsible="icon">
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Havelandet CMS</SidebarGroupLabel>
+          <SidebarGroupLabel>Havekongen CMS</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {items.map((it) => (

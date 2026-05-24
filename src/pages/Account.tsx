@@ -277,7 +277,7 @@ export default function Account() {
               <h2>Din profil forbinder værktøjerne, så hvert scan, kortpunkt og plejeråd kan følge med videre.</h2>
               <p>
                 Brug dette som kontrolrum for kalender, notifikationer, AI-hukommelse, device-signaler og værktøjshandoff.
-                Når det er aktivt, kan Havelandet dele den rigtige havekontekst mellem Havemåler, Min have,
+                Når det er aktivt, kan Havekongen dele den rigtige havekontekst mellem Havemåler, Min have,
                 Havekompagnon og Plantepleje AI.
               </p>
               <div className="account-integration-actions">

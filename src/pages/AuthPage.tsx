@@ -75,7 +75,7 @@ export default function AuthPage({ initialMode }: { initialMode: Mode }) {
         </div>
         <h1 style={{ fontSize: 40, marginBottom: 28 }}>
           {mode === "signup"
-            ? "Velkommen til Havelandet."
+            ? "Velkommen til Havekongen."
             : mode === "login"
             ? "Log ind på din have."
             : "Nulstil dit kodeord."}

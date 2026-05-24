@@ -32,7 +32,7 @@ type Product = {
   in_stock: boolean;
 };
 
-const RV_KEY = "havelandet-recently-viewed";
+const RV_KEY = "havekongen-recently-viewed";
 function pushRecent(slug: string) {
   try {
     const arr: string[] = JSON.parse(localStorage.getItem(RV_KEY) || "[]");
@@ -53,7 +53,7 @@ export default function ProductDetail() {
   const nav = useNavigate();
 
   usePageMeta({
-    title: p ? `${p.name} · Havelandet` : "Produkt · Havelandet",
+    title: p ? `${p.name} · Havekongen` : "Produkt · Havekongen",
     description: p?.short_description || p?.meta || undefined,
   });
 

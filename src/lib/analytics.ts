@@ -7,7 +7,7 @@ export type AnalyticsEvent = {
   props?: Record<string, unknown>;
 };
 
-const KEY = "havelandet-analytics";
+const KEY = "havekongen-analytics";
 const MAX = 500;
 
 function read(): AnalyticsEvent[] {

@@ -4,7 +4,7 @@ import { SiteNav, SiteFooter } from "@/components/layout/SiteChrome";
 
 export default function Index() {
   useEffect(() => {
-    document.title = "Havelandet — Lev din have";
+    document.title = "Havekongen — Lev din have";
     let cleanup: undefined | (() => void);
     let cancelled = false;
     // Lazy-load the heavy 3D scene only when the landing page mounts.
@@ -25,7 +25,7 @@ export default function Index() {
       {/* Loader */}
       <div className="loader" id="hl-loader">
         <div className="loader-mark" />
-        <div className="loader-label">Havelandet</div>
+        <div className="loader-label">Havekongen</div>
         <div className="loader-progress">Forbereder haven</div>
       </div>
 
@@ -46,7 +46,7 @@ export default function Index() {
           <div className="hero-intro" id="heroIntro">
             <h1>Hele din have. <em>Ét sted.</em></h1>
             <p className="lede">
-              Havelandet er platformen der binder hele din have sammen — vanding, robotklipper,
+              Havekongen er platformen der binder hele din have sammen — vanding, robotklipper,
               frø, planter og daglig pleje. Bygget til danske haver.
             </p>
           </div>
@@ -54,7 +54,7 @@ export default function Index() {
           <div className="act-marker" data-act="1">
             <div className="ix">Akt 01 — Det store overblik</div>
             <h2>Hver kvadratmeter, kortlagt.</h2>
-            <p>Bede, plæne, terrasse, drivhus, pergola. Havelandet kender din have — fra hækken i øst til kompostbunken i vest.</p>
+            <p>Bede, plæne, terrasse, drivhus, pergola. Havekongen kender din have — fra hækken i øst til kompostbunken i vest.</p>
           </div>
           <div className="act-marker" data-act="2">
             <div className="ix">Akt 02 — Haven arbejder selv</div>
@@ -64,7 +64,7 @@ export default function Index() {
           <div className="act-marker" data-act="3">
             <div className="ix">Akt 03 — Året rundt</div>
             <h2>Fra forårsknopper til efterårsløv.</h2>
-            <p>Havelandet følger sæsonerne. Påmindelser om hvornår du skal beskære, så, høste og dække til — alt uden at du skal tænke over det.</p>
+            <p>Havekongen følger sæsonerne. Påmindelser om hvornår du skal beskære, så, høste og dække til — alt uden at du skal tænke over det.</p>
           </div>
           <div className="act-marker" data-act="4">
             <div className="ix">Akt 04 — Platformen</div>
@@ -87,7 +87,7 @@ export default function Index() {
               <div className="eyebrow" style={{ marginBottom: 16 }}>Platformen</div>
               <h2>Tre værktøjer. Én have.</h2>
             </div>
-            <p>Havelandet er bygget op om de værktøjer du bruger ugentligt — fra forår til vinter. Mål, planlæg, og spørg AI'en om råd. Alt sammen ét sted, uden abonnement på det vi bruger.</p>
+            <p>Havekongen er bygget op om de værktøjer du bruger ugentligt — fra forår til vinter. Mål, planlæg, og spørg AI'en om råd. Alt sammen ét sted, uden abonnement på det vi bruger.</p>
           </div>
 
           <div className="tools-grid">
@@ -195,7 +195,7 @@ export default function Index() {
               <h2>Bygget til danske haver. Ikke importeret.</h2>
             </div>
             <div className="manifesto-body">
-              <p>Vi startede Havelandet fordi vi savnede ét sted hvor man kunne handle og passe sin have — uden at skulle hoppe mellem fem apps og tre webshops.</p>
+              <p>Vi startede Havekongen fordi vi savnede ét sted hvor man kunne handle og passe sin have — uden at skulle hoppe mellem fem apps og tre webshops.</p>
               <p>I dag arbejder vi med danske gartnerier, lokale frøavlere og dygtige danske ingeniører. Alt vi anbefaler er testet i dansk klima — fra en regnvåd marts til en tør juli.</p>
               <div className="manifesto-stats">
                 <Stat n="38.000+" l="Aktive haver" />

@@ -9,7 +9,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* shadcn semantic tokens (used by ui/* components) — derived from Havelandet palette */
+/* shadcn semantic tokens (used by ui/* components) — derived from Havekongen palette */
 @layer base {
   :root {
     --background: 48 33% 97%;          /* paper */

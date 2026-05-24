@@ -55,7 +55,7 @@ export default function MinHave() {
   const [todayWeather, setTodayWeather] = useState<Weather | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { document.title = "Min have — Havelandet"; }, []);
+  useEffect(() => { document.title = "Min have — Havekongen"; }, []);
   useEffect(() => { if (!authLoading && !user) navigate("/login?next=/min-have"); }, [user, authLoading, navigate]);
 
   useEffect(() => {

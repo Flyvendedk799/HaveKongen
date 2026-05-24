@@ -27,7 +27,7 @@ export default function GardenWildlife() {
   const [plants, setPlants] = useState<Plant[]>([]);
 
   useEffect(() => {
-    document.title = "Dyreliv - Havelandet";
+    document.title = "Dyreliv - Havekongen";
   }, []);
 
   useEffect(() => {

@@ -62,7 +62,7 @@ export const useCart = create<CartState>()(
       count: () => get().items.reduce((sum, i) => sum + i.qty, 0),
     }),
     {
-      name: "havelandet-cart",
+      name: "havekongen-cart",
       storage: createJSONStorage(() => window.localStorage),
       partialize: (s) => ({ items: s.items }),
     }

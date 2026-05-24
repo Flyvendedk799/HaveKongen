@@ -48,7 +48,7 @@ export default function Webshop() {
   const wishlist = useWishlist();
 
   usePageMeta({
-    title: "Webshop · Havelandet",
+    title: "Webshop · Havekongen",
     description: "Frø, planter, jord og smarte værktøjer fra danske leverandører — testet i dansk klima.",
   });
 
