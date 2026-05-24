@@ -216,6 +216,7 @@ export type Database = {
           id: string
           kind: Database["public"]["Enums"]["device_kind"]
           last_seen: string | null
+          map_position: Json | null
           metadata: Json | null
           name: string
           status: string
@@ -228,6 +229,7 @@ export type Database = {
           id?: string
           kind: Database["public"]["Enums"]["device_kind"]
           last_seen?: string | null
+          map_position?: Json | null
           metadata?: Json | null
           name: string
           status?: string
@@ -240,6 +242,7 @@ export type Database = {
           id?: string
           kind?: Database["public"]["Enums"]["device_kind"]
           last_seen?: string | null
+          map_position?: Json | null
           metadata?: Json | null
           name?: string
           status?: string
@@ -663,6 +666,56 @@ export type Database = {
         }
         Relationships: []
       }
+      integration_connections: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          garden_id: string | null
+          id: string
+          kind: string
+          last_sync_at: string | null
+          provider: string
+          settings: Json
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          garden_id?: string | null
+          id?: string
+          kind: string
+          last_sync_at?: string | null
+          provider: string
+          settings?: Json
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          garden_id?: string | null
+          id?: string
+          kind?: string
+          last_sync_at?: string | null
+          provider?: string
+          settings?: Json
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_connections_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lawn_segmentation_cache: {
         Row: {
           bbox_hash: string
@@ -987,7 +1040,7 @@ export type Database = {
           image_url: string | null
           observation_id: string | null
           plant_id: string | null
-          prevention: string[] | null
+          prevention: string | null
           product_suggestions: Json | null
           raw: Json | null
           severity: string | null
@@ -1005,7 +1058,7 @@ export type Database = {
           image_url?: string | null
           observation_id?: string | null
           plant_id?: string | null
-          prevention?: string[] | null
+          prevention?: string | null
           product_suggestions?: Json | null
           raw?: Json | null
           severity?: string | null
@@ -1023,7 +1076,7 @@ export type Database = {
           image_url?: string | null
           observation_id?: string | null
           plant_id?: string | null
-          prevention?: string[] | null
+          prevention?: string | null
           product_suggestions?: Json | null
           raw?: Json | null
           severity?: string | null
