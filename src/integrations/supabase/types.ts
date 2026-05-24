@@ -208,8 +208,120 @@ export type Database = {
         }
         Relationships: []
       }
+      device_actions: {
+        Row: {
+          approved_at: string | null
+          created_at: string
+          device_id: string | null
+          garden_id: string | null
+          id: string
+          kind: string | null
+          payload: Json
+          requested_at: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          approved_at?: string | null
+          created_at?: string
+          device_id?: string | null
+          garden_id?: string | null
+          id?: string
+          kind?: string | null
+          payload?: Json
+          requested_at?: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          approved_at?: string | null
+          created_at?: string
+          device_id?: string | null
+          garden_id?: string | null
+          id?: string
+          kind?: string | null
+          payload?: Json
+          requested_at?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "device_actions_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "device_actions_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      device_readings: {
+        Row: {
+          created_at: string
+          data: Json
+          device_id: string | null
+          garden_id: string | null
+          id: string
+          kind: string
+          observed_at: string
+          unit: string | null
+          user_id: string
+          value: number | null
+          zone_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          device_id?: string | null
+          garden_id?: string | null
+          id?: string
+          kind: string
+          observed_at?: string
+          unit?: string | null
+          user_id: string
+          value?: number | null
+          zone_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          device_id?: string | null
+          garden_id?: string | null
+          id?: string
+          kind?: string
+          observed_at?: string
+          unit?: string | null
+          user_id?: string
+          value?: number | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "device_readings_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "device_readings_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       devices: {
         Row: {
+          autopilot_enabled: boolean
           battery: number | null
           created_at: string
           garden_id: string | null
@@ -223,6 +335,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          autopilot_enabled?: boolean
           battery?: number | null
           created_at?: string
           garden_id?: string | null
@@ -236,6 +349,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          autopilot_enabled?: boolean
           battery?: number | null
           created_at?: string
           garden_id?: string | null
@@ -569,6 +683,7 @@ export type Database = {
           longitude: number | null
           name: string
           polygon: Json | null
+          preferences: Json
           thumbnail_url: string | null
           updated_at: string
           user_id: string
@@ -586,6 +701,7 @@ export type Database = {
           longitude?: number | null
           name?: string
           polygon?: Json | null
+          preferences?: Json
           thumbnail_url?: string | null
           updated_at?: string
           user_id: string
@@ -603,6 +719,7 @@ export type Database = {
           longitude?: number | null
           name?: string
           polygon?: Json | null
+          preferences?: Json
           thumbnail_url?: string | null
           updated_at?: string
           user_id?: string
@@ -1036,6 +1153,7 @@ export type Database = {
           confidence: number | null
           created_at: string
           diagnosis: string | null
+          garden_id: string | null
           id: string
           image_url: string | null
           observation_id: string | null
@@ -1054,6 +1172,7 @@ export type Database = {
           confidence?: number | null
           created_at?: string
           diagnosis?: string | null
+          garden_id?: string | null
           id?: string
           image_url?: string | null
           observation_id?: string | null
@@ -1072,6 +1191,7 @@ export type Database = {
           confidence?: number | null
           created_at?: string
           diagnosis?: string | null
+          garden_id?: string | null
           id?: string
           image_url?: string | null
           observation_id?: string | null
@@ -1085,7 +1205,15 @@ export type Database = {
           user_id?: string
           zone_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "plant_health_log_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       plants_catalog: {
         Row: {
@@ -1387,6 +1515,7 @@ export type Database = {
           plant_id: string | null
           priority: string | null
           reason: string | null
+          snoozed_until: string | null
           source: string | null
           title: string
           user_id: string
@@ -1407,6 +1536,7 @@ export type Database = {
           plant_id?: string | null
           priority?: string | null
           reason?: string | null
+          snoozed_until?: string | null
           source?: string | null
           title: string
           user_id: string
@@ -1427,6 +1557,7 @@ export type Database = {
           plant_id?: string | null
           priority?: string | null
           reason?: string | null
+          snoozed_until?: string | null
           source?: string | null
           title?: string
           user_id?: string
