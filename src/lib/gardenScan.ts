@@ -96,6 +96,24 @@ export type PipelineIssue = {
   message: string;
 };
 
+export type ScanEvidenceSummary = {
+  status: string;
+  routeStepCount: number;
+  completedRouteSteps: number;
+  routeReady: boolean;
+  keyframeCount: number;
+  keyframesReady: boolean;
+  alignableAnchorCount: number;
+  anchorSpreadM: number;
+  manualAnchorsStrong: boolean;
+  manualAnchorsRecommended: boolean;
+  readyToUpload: boolean;
+  processingAttempts: number;
+  warningCodes: string[];
+  readinessLabel: string;
+  readinessHint: string;
+};
+
 export const MIN_SCAN_KEYFRAMES = 8;
 export const RECOMMENDED_SCAN_KEYFRAMES = 18;
 export const MIN_ROUTE_STEPS = 4;
@@ -212,8 +230,9 @@ export function expectedArtifactPaths(prefix: string) {
 }
 
 export function latestUsefulScan(sessions: GardenScanSession[]) {
-  return sessions.find((session) => session.status === "ready")
+  return sessions.find((session) => session.status === "created" || session.status === "capturing" || session.status === "needs_anchor_correction")
     ?? sessions.find((session) => session.status === "processing" || session.status === "uploaded")
+    ?? sessions.find((session) => session.status === "ready")
     ?? sessions[0]
     ?? null;
 }
@@ -221,6 +240,84 @@ export function latestUsefulScan(sessions: GardenScanSession[]) {
 export function normalizeScanWarnings(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map(String).map((warning) => warning.trim()).filter(Boolean).slice(0, 24);
+}
+
+function recordOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function numberFromRecord(value: unknown, key: string) {
+  const record = recordOrNull(value);
+  return record ? finiteNumber(record[key]) : null;
+}
+
+function countMetadataRouteSteps(value: unknown) {
+  const record = recordOrNull(value);
+  const routeSteps = Array.isArray(record?.route_steps) ? record.route_steps : [];
+  return routeSteps.filter((step) => recordOrNull(step) && typeof recordOrNull(step)?.id === "string").length;
+}
+
+export function scanEvidenceSummary(session: GardenScanSession): ScanEvidenceSummary {
+  const metadata = recordOrNull(session.capture_metadata) ?? {};
+  const alignableAnchorCount = countAlignableAnchors(session.anchors);
+  const anchorSpreadM = anchorSpreadMeters(session.anchors);
+  const routeStepCount = numberFromRecord(metadata, "route_step_count")
+    ?? numberFromRecord(metadata, "required_route_steps")
+    ?? countMetadataRouteSteps(metadata)
+    ?? 0;
+  const completedRouteSteps = numberFromRecord(metadata, "completed_route_steps")
+    ?? countMetadataRouteSteps(metadata)
+    ?? 0;
+  const keyframeCount = numberFromRecord(metadata, "keyframe_count")
+    ?? numberFromRecord(metadata, "frame_count")
+    ?? 0;
+  const routeReady = completedRouteSteps >= MIN_ROUTE_STEPS;
+  const keyframesReady = keyframeCount >= MIN_SCAN_KEYFRAMES;
+  const manualAnchorsStrong = alignableAnchorCount >= MIN_ALIGNED_ANCHORS && anchorSpreadM >= MIN_ANCHOR_SPREAD_M;
+  const manualAnchorsRecommended = alignableAnchorCount >= RECOMMENDED_ALIGNED_ANCHORS && anchorSpreadM >= RECOMMENDED_ANCHOR_SPREAD_M;
+  const readyToUpload = Boolean(session.upload_prefix && routeReady && keyframesReady);
+  const warningCodes = normalizeScanWarnings(session.warnings);
+
+  let readinessLabel = "Scanpakke mangler";
+  let readinessHint = "Gennemfør ruten med kameraet peget mod havens midte.";
+  if (!routeReady) {
+    readinessLabel = "Rute mangler";
+    readinessHint = `Gennemfør ${Math.max(0, MIN_ROUTE_STEPS - completedRouteSteps)} rutepunkt${MIN_ROUTE_STEPS - completedRouteSteps === 1 ? "" : "er"} mere.`;
+  } else if (!keyframesReady) {
+    readinessLabel = "Flere vinkler";
+    readinessHint = `Saml ${Math.max(0, MIN_SCAN_KEYFRAMES - keyframeCount)} keyframe${MIN_SCAN_KEYFRAMES - keyframeCount === 1 ? "" : "s"} mere før upload.`;
+  } else if (!manualAnchorsStrong) {
+    readinessLabel = "Klar uden manuelle ankre";
+    readinessHint = "Rute og billeder er nok til upload. Tilføj 2 manuelle ankre for stærkere alignment.";
+  } else if (!manualAnchorsRecommended) {
+    readinessLabel = "Klar med ankre";
+    readinessHint = "Upload er klar. Flere eller mere spredte ankre kan styrke 3D-alignment.";
+  } else {
+    readinessLabel = "Stærk scanpakke";
+    readinessHint = "Rute, keyframes og manuelle ankre er klar til rekonstruktion.";
+  }
+
+  return {
+    status: session.status,
+    routeStepCount,
+    completedRouteSteps,
+    routeReady,
+    keyframeCount,
+    keyframesReady,
+    alignableAnchorCount,
+    anchorSpreadM,
+    manualAnchorsStrong,
+    manualAnchorsRecommended,
+    readyToUpload,
+    processingAttempts: session.processing_attempts ?? 0,
+    warningCodes,
+    readinessLabel,
+    readinessHint,
+  };
 }
 
 function isLngLat(value: unknown): value is [number, number] {

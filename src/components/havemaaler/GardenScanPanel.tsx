@@ -2,7 +2,7 @@ import { Activity, CheckCircle2, ExternalLink, Layers3, Play, ShieldCheck, Uploa
 import type { GardenDepthModel } from "@/lib/gardenDepth";
 import { depthPipelineStage, depthPipelineStageLabel, inspectGardenDepthModel, summarizeDepthModel } from "@/lib/gardenDepth";
 import type { GardenScanSession, ScanUploadTarget } from "@/lib/gardenScan";
-import { requiredAnchorCount, scanActionHint, scanCanStartNewSession, scanProgress, scanStatusLabel, scanStatusTone } from "@/lib/gardenScan";
+import { latestUsefulScan, MIN_ROUTE_STEPS, MIN_SCAN_KEYFRAMES, RECOMMENDED_ALIGNED_ANCHORS, scanActionHint, scanCanStartNewSession, scanEvidenceSummary, scanProgress, scanStatusLabel, scanStatusTone } from "@/lib/gardenScan";
 
 type Props = {
   depthModel: GardenDepthModel | null;
@@ -35,8 +35,8 @@ export default function GardenScanPanel({
   const isFlatPreview = stage === "satellite_preview" || stage === "outline_only";
   const geometryCount = isFlatPreview ? depthModel?.terrain.lawnRings.length ?? 0 : summary?.objectCount ?? 0;
   const confirmedCount = isFlatPreview ? 0 : summary?.highConfidenceObjects ?? 0;
-  const latest = sessions[0] ?? null;
-  const anchorState = latest ? requiredAnchorCount(latest.status, latest.anchors) : null;
+  const latest = latestUsefulScan(sessions);
+  const evidence = latest ? scanEvidenceSummary(latest) : null;
   const canStartAnother = scanCanStartNewSession(sessions);
   const resolvedScanButtonLabel = scanButtonLabel ?? (canStartAnother ? "Scan mobil" : "Fortsæt scan");
   const blockingIssueCount = inspection?.issues.filter((issue) => issue.severity === "error").length ?? 0;
@@ -54,8 +54,8 @@ export default function GardenScanPanel({
 
       <div className="garden-scan-panel__metrics">
         <div><CheckCircle2 size={14} /><strong>{geometryCount}</strong><span>{isFlatPreview ? "plæneflader" : "objekter"}</span></div>
-        <div><ShieldCheck size={14} /><strong>{confirmedCount}</strong><span>{isFlatPreview ? "scannede" : "bekræftet"}</span></div>
-        <div><Activity size={14} /><strong>{depthModel?.captureReadiness.recommendedSeconds.join("-") ?? "45-90"}</strong><span>sek scan</span></div>
+        <div><Activity size={14} /><strong>{evidence ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS}` : depthModel?.captureReadiness.recommendedSeconds.join("-") ?? "45-90"}</strong><span>{evidence ? "rute" : "sek scan"}</span></div>
+        <div><ShieldCheck size={14} /><strong>{evidence ? evidence.keyframeCount : confirmedCount}</strong><span>{evidence ? "keyframes" : isFlatPreview ? "scannede" : "bekræftet"}</span></div>
       </div>
 
       {depthModel && (
@@ -106,11 +106,11 @@ export default function GardenScanPanel({
           </div>
           <i><b style={{ width: `${scanProgress(latest.status)}%` }} /></i>
           <small>
-            {anchorState ? `${anchorState.count}/${anchorState.recommended} ankre` : "Ingen ankre endnu"}
-            {latest.processing_attempts ? ` · ${latest.processing_attempts} forsøg` : ""}
+            {evidence ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS} rute · ${Math.min(evidence.keyframeCount, MIN_SCAN_KEYFRAMES)}/${MIN_SCAN_KEYFRAMES} billeder · ${evidence.alignableAnchorCount}/${RECOMMENDED_ALIGNED_ANCHORS} ankre` : "Ingen scandata endnu"}
+            {evidence?.processingAttempts ? ` · ${evidence.processingAttempts} forsøg` : ""}
             {latest.error_detail ? ` · ${latest.error_detail}` : ""}
           </small>
-          <em>{scanActionHint(latest.status)}</em>
+          <em>{evidence?.readinessHint ?? scanActionHint(latest.status)}</em>
         </div>
       )}
 

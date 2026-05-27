@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Json, TablesInsert } from "@/integrations/supabase/types";
 import { track } from "@/lib/analytics";
 import type { LawnCropPayload, LawnSegmentationResult, SegmentationSeed } from "./types";
 
@@ -17,6 +18,7 @@ type TelemetryExtra = {
   cached?: boolean;
   candidateCount?: number;
 };
+type TelemetryInsert = TablesInsert<"havemaaler_segmentation_events">;
 
 const SESSION_KEY = "havemaaler:segmentation-session:v1";
 
@@ -106,28 +108,26 @@ export function logHavemaalerSegmentationEvent(
     confidence: typeof result?.confidence === "number" ? Number(result.confidence.toFixed(4)) : null,
     needs_review: result?.needsReview ?? null,
     accepted: extra.accepted ?? null,
-    seed_counts: seedCounts(seeds),
+    seed_counts: seedCounts(seeds) as Json,
     warnings: result?.diagnostics.warnings ?? [],
-    diagnostics: cleanDiagnostics(result, crop, extra),
-    client_context: clientContext(),
-  };
+    diagnostics: cleanDiagnostics(result, crop, extra) as Json,
+    client_context: clientContext() as Json,
+  } satisfies TelemetryInsert;
 
   track(eventName, payload);
 
   // Best-effort production telemetry. This intentionally stores no raw imagery,
   // address, or exact coordinates; crop_hash lets us group repeated failures.
   Promise.resolve(
-    supabase.from("havemaaler_segmentation_events" as any).insert(payload as any)
+    supabase.from("havemaaler_segmentation_events").insert(payload)
   )
     .then(({ error }) => {
-      if (error && (import.meta as any).env?.DEV) {
-        // eslint-disable-next-line no-console
+      if (error && import.meta.env.DEV) {
         console.debug("[havemaaler telemetry]", error.message);
       }
     })
     .catch((error) => {
-      if ((import.meta as any).env?.DEV) {
-        // eslint-disable-next-line no-console
+      if (import.meta.env.DEV) {
         console.debug("[havemaaler telemetry]", error?.message ?? error);
       }
     });

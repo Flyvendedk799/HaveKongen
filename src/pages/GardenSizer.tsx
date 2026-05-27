@@ -33,12 +33,23 @@ import {
   generateGardenDepthModel,
   type GardenDepthModel,
 } from "@/lib/gardenDepth";
+import {
+  centerFromRings,
+  exclusionRingsFromJson,
+  gardenGeometryFingerprint,
+  isLngLat,
+  normalizeRing,
+  polygonForRing,
+  polygonForRings,
+  ringsFromGeoJson,
+  serializeExclusions,
+  type LngLat,
+  type Ring,
+} from "@/lib/havemaalerGeometry";
 import { isTerminalScanStatus, scanCanStartNewSession, webGardenScanUrl } from "@/lib/gardenScan";
 import type { GardenScanSession, ScanUploadTarget } from "@/lib/gardenScan";
 
 type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" | "mapbox" };
-type LngLat = [number, number];
-type Ring = LngLat[];
 type Mode = "draw" | "exclude" | "edit" | "wand";
 type WandOp = "replace" | "add" | "subtract";
 type WandReviewMode = "none" | "add" | "remove";
@@ -46,84 +57,15 @@ type WandStage = "idle" | "Henter billede" | "Finder græs" | "Tegner kant" | "K
 type Imagery = "ortofoto" | "mapbox";
 type MapView = "map" | "twin";
 type EditableRingId = "main" | `lawn:${number}` | `excl:${number}`;
-type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "polygon" | "exclusions" | "imagery_source" | "thumbnail_url" | "depth_model" | "depth_model_updated_at">;
+type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "area_m2" | "polygon" | "exclusions" | "imagery_source" | "thumbnail_url" | "depth_model" | "depth_model_updated_at">;
 type SavedLawnZone = Pick<Tables<"garden_zones">, "id" | "polygon">;
+type JsonRecord = Record<string, unknown>;
+type MapFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, JsonRecord>;
 
 const AUTOSAVE_KEY = "havemaaler:draft:v2";
 const WAND_CROP_METERS = 36;
 const WAND_IMAGE_SIZE = 512;
 const WAND_TIMEOUT_MS = 30000;
-
-function parseMaybeJson(value: unknown) {
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-function isLngLat(value: unknown): value is LngLat {
-  return Array.isArray(value) && value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number";
-}
-
-function sameLngLat(a: LngLat, b: LngLat) {
-  return Math.abs(a[0] - b[0]) < 1e-10 && Math.abs(a[1] - b[1]) < 1e-10;
-}
-
-function normalizeRing(coords: unknown): Ring | null {
-  if (!Array.isArray(coords)) return null;
-  const ring = coords.filter(isLngLat).map((point) => [point[0], point[1]] as LngLat);
-  if (ring.length >= 2 && sameLngLat(ring[0], ring[ring.length - 1])) ring.pop();
-  return ring.length >= 3 ? ring : null;
-}
-
-function ringsFromGeoJson(value: unknown): Ring[] {
-  const data = parseMaybeJson(value);
-  if (!data || typeof data !== "object") return [];
-  const obj = data as { type?: unknown; coordinates?: unknown };
-  if (obj.type === "Polygon" && Array.isArray(obj.coordinates)) {
-    const ring = normalizeRing(obj.coordinates[0]);
-    return ring ? [ring] : [];
-  }
-  if (obj.type === "MultiPolygon" && Array.isArray(obj.coordinates)) {
-    return obj.coordinates
-      .map((polygon) => {
-        if (!Array.isArray(polygon)) return null;
-        return normalizeRing(polygon[0]) ?? (Array.isArray(polygon[0]) ? normalizeRing(polygon[0][0]) : null);
-      })
-      .filter((ring): ring is Ring => Boolean(ring));
-  }
-  if (Array.isArray(data)) {
-    const direct = normalizeRing(data);
-    if (direct) return [direct];
-    const polygonRing = normalizeRing(data[0]);
-    return polygonRing ? [polygonRing] : [];
-  }
-  return [];
-}
-
-function exclusionRingsFromJson(value: unknown): Ring[] {
-  const data = parseMaybeJson(value);
-  if (!Array.isArray(data)) return ringsFromGeoJson(data);
-  return data.flatMap((item) => {
-    const rings = ringsFromGeoJson(item);
-    if (rings.length) return rings;
-    const ring = normalizeRing(item);
-    return ring ? [ring] : [];
-  });
-}
-
-function centerFromRings(rings: Ring[]): LngLat | null {
-  const points = rings.flat();
-  if (!points.length) return null;
-  const lngs = points.map((point) => point[0]);
-  const lats = points.map((point) => point[1]);
-  return [
-    (Math.min(...lngs) + Math.max(...lngs)) / 2,
-    (Math.min(...lats) + Math.max(...lats)) / 2,
-  ];
-}
 
 function safeInternalPath(value: string | null) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
@@ -175,6 +117,76 @@ function clipBboxToParcel(bbox: [number, number, number, number], parcel?: Ring 
   const parcelBox = ringBbox(parcel);
   if (!parcelBox) return bbox;
   return [Math.max(bbox[0], parcelBox[0]), Math.max(bbox[1], parcelBox[1]), Math.min(bbox[2], parcelBox[2]), Math.min(bbox[3], parcelBox[3])];
+}
+
+function emptyFeatureCollection(): MapFeatureCollection {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function recordOrNull(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringOrFallback(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function lngLatFromUnknown(value: unknown): LngLat | null {
+  return isLngLat(value) ? [value[0], value[1]] : null;
+}
+
+function featureProps(feature: mapboxgl.MapboxGeoJSONFeature): JsonRecord {
+  return feature.properties ?? {};
+}
+
+function editableRingIdFromUnknown(value: unknown): EditableRingId | null {
+  if (value === "main") return "main";
+  if (typeof value === "string" && /^lawn:\d+$/.test(value)) return value as `lawn:${number}`;
+  if (typeof value === "string" && /^excl:\d+$/.test(value)) return value as `excl:${number}`;
+  return null;
+}
+
+function vibrateDevice(durationMs: number) {
+  const nav = navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean };
+  nav.vibrate?.(durationMs);
+}
+
+function parseDawaSuggestion(item: unknown): Suggestion | null {
+  const address = recordOrNull(recordOrNull(item)?.adresse);
+  if (!address) return null;
+  const x = finiteNumber(address.x);
+  const y = finiteNumber(address.y);
+  if (x == null || y == null) return null;
+
+  const street = stringOrFallback(address.vejnavn);
+  const house = stringOrFallback(address.husnr);
+  const postcode = stringOrFallback(address.postnr);
+  const city = stringOrFallback(address.postnrnavn);
+  return {
+    id: stringOrFallback(address.id, `${x},${y}`),
+    place_name: `${street} ${house}, ${postcode} ${city}`.trim(),
+    center: [x, y],
+    text: `${street} ${house}`.trim(),
+    source: "dawa",
+  };
+}
+
+function parseMapboxSuggestion(feature: unknown): Suggestion | null {
+  const record = recordOrNull(feature);
+  if (!record) return null;
+  const center = lngLatFromUnknown(record.center);
+  if (!center) return null;
+  return {
+    id: stringOrFallback(record.id, `${center[0]},${center[1]}`),
+    place_name: stringOrFallback(record.place_name),
+    center,
+    text: stringOrFallback(record.text),
+    source: "mapbox",
+  };
 }
 
 const TIERS = [
@@ -231,6 +243,7 @@ export default function GardenSizer() {
   const [saving, setSaving] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
   const [savedDepthModel, setSavedDepthModel] = useState<GardenDepthModel | null>(null);
+  const [savedGeometryFingerprint, setSavedGeometryFingerprint] = useState<string | null>(null);
   const [scanLaunch, setScanLaunch] = useState<{ sessionId: string; scanUrl: string; uploadPrefix?: string | null; uploadTargets?: ScanUploadTarget[] } | null>(null);
   const [scanSessions, setScanSessions] = useState<GardenScanSession[]>([]);
   const [pinpointing, setPinpointing] = useState<{ name: string; center: LngLat } | null>(null);
@@ -244,6 +257,7 @@ export default function GardenSizer() {
 
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const closeClickHandledAtRef = useRef(0);
   const completedLawns = useMemo(
     () => (mainClosed && main.length >= 3 ? [main, ...additionalLawns] : []),
     [main, mainClosed, additionalLawns],
@@ -296,23 +310,19 @@ export default function GardenSizer() {
       try {
         const r = await fetch(dawaUrl); const j = await r.json();
         const exact = (Array.isArray(j) ? j : [])
-          .map((item: any) => item?.adresse)
-          .filter((a: any) => Number.isFinite(a?.x) && Number.isFinite(a?.y))
-          .map((a: any) => ({
-            id: a.id,
-            place_name: `${a.vejnavn} ${a.husnr}, ${a.postnr} ${a.postnrnavn}`,
-            center: [a.x, a.y] as LngLat,
-            text: `${a.vejnavn} ${a.husnr}`,
-            source: "dawa" as const,
-          }));
+          .map(parseDawaSuggestion)
+          .filter((item): item is Suggestion => Boolean(item));
         if (exact.length) { setSuggestions(uniqueSuggestions(exact)); return; }
         if (!mapboxToken) return;
         const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=dk&language=da&limit=6&access_token=${mapboxToken}`;
         const mr = await fetch(url); const mj = await mr.json();
-        setSuggestions(uniqueSuggestions((mj.features ?? []).map((f: any) => ({
-          id: f.id, place_name: f.place_name, center: f.center as LngLat, text: f.text, source: "mapbox" as const,
-        }))));
-      } catch { /* ignore */ }
+        const features = recordOrNull(mj)?.features;
+        setSuggestions(uniqueSuggestions((Array.isArray(features) ? features : [])
+          .map(parseMapboxSuggestion)
+          .filter((item): item is Suggestion => Boolean(item))));
+      } catch {
+        /* Address suggestions are best effort while the user is typing. */
+      }
     }, 220);
     return () => clearTimeout(t);
   }, [query, mapboxToken]);
@@ -323,6 +333,7 @@ export default function GardenSizer() {
     clearWandPreview();
     setMatrikel(null);
     setSavedDepthModel(null);
+    setSavedGeometryFingerprint(null);
     setScanLaunch(null);
     setMapView("map");
     // Trigger cinematic pinpoint; finalises into step 2 in onDone
@@ -338,7 +349,7 @@ export default function GardenSizer() {
   }
 
   // ----- Build style for current imagery choice -----
-  const buildStyle = useCallback((): mapboxgl.Style => {
+  const buildStyle = useCallback((): mapboxgl.Style | string => {
     if (imagery === "ortofoto" && ortoCfg) {
       return {
         version: 8,
@@ -362,9 +373,9 @@ export default function GardenSizer() {
           { id: "sat", type: "raster", source: "sat" },
           { id: "orto", type: "raster", source: "orto", paint: { "raster-opacity": 0.88 } },
         ],
-      } as any;
+      };
     }
-    return "mapbox://styles/mapbox/satellite-streets-v12" as any;
+    return "mapbox://styles/mapbox/satellite-streets-v12";
   }, [imagery, ortoCfg, mapboxToken]);
 
   // ----- Init / re-init map -----
@@ -373,7 +384,7 @@ export default function GardenSizer() {
     if (imagery === "ortofoto" && !ortoCfg) return; // wait for config
 
     if (mapRef.current) {
-      mapRef.current.setStyle(buildStyle() as any);
+      mapRef.current.setStyle(buildStyle());
       // Re-add overlay sources after style swap
       mapRef.current.once("style.load", addOverlayLayers);
       return;
@@ -381,7 +392,7 @@ export default function GardenSizer() {
 
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: buildStyle() as any,
+      style: buildStyle(),
       center: chosen.center,
       zoom: 19, minZoom: 14, maxZoom: 21,
       pitch: 0,
@@ -408,14 +419,14 @@ export default function GardenSizer() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(buildStyle() as any);
+    map.setStyle(buildStyle());
     map.once("style.load", addOverlayLayers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imagery, ortoCfg]);
 
   function addOverlayLayers() {
     const map = mapRef.current; if (!map) return;
-    const empty = { type: "FeatureCollection", features: [] } as any;
+    const empty = emptyFeatureCollection();
     if (!map.getSource("matrikel")) {
       map.addSource("matrikel", { type: "geojson", data: empty });
       map.addLayer({ id: "matrikel-line", type: "line", source: "matrikel",
@@ -545,11 +556,14 @@ export default function GardenSizer() {
     if (s.mode === "edit") {
       // insert vertex on midpoint click
       const feats = map.queryRenderedFeatures(e.point, { layers: ["vertices-circle"] });
-      const mid = feats.find(f => (f.properties as any)?.midpoint);
+      const mid = feats.find(f => featureProps(f).midpoint === true);
       if (mid) {
-        const idx = (mid.properties as any).insertAt as number;
-        const ring = (mid.properties as any).ring as EditableRingId;
-        updateEditableRing(ring, (prev) => { const n = [...prev]; n.splice(idx, 0, ll); return n; });
+        const props = featureProps(mid);
+        const idx = finiteNumber(props.insertAt);
+        const ring = editableRingIdFromUnknown(props.ring);
+        if (idx != null && ring) {
+          updateEditableRing(ring, (prev) => { const n = [...prev]; n.splice(idx, 0, ll); return n; });
+        }
       }
       return;
     }
@@ -557,9 +571,10 @@ export default function GardenSizer() {
     if (s.mode === "draw") {
       const drawingRing = s.mainClosed ? s.currentLawn : s.main;
       if (drawingRing.length >= 3) {
-        const start = map.project(drawingRing[0] as any);
-        const cur = map.project(ll as any);
+        const start = map.project(drawingRing[0]);
+        const cur = map.project(ll);
         if (Math.hypot(start.x - cur.x, start.y - cur.y) < 14) {
+          closeClickHandledAtRef.current = Date.now();
           if (s.mainClosed) addCompletedLawn(drawingRing);
           else setMainClosed(true);
           return;
@@ -570,9 +585,10 @@ export default function GardenSizer() {
     } else if (s.mode === "exclude") {
       if (!s.mainClosed) { toast("Tegn græsplænen først"); return; }
       if (s.currentExclusion.length >= 3) {
-        const start = map.project(s.currentExclusion[0] as any);
-        const cur = map.project(ll as any);
+        const start = map.project(s.currentExclusion[0]);
+        const cur = map.project(ll);
         if (Math.hypot(start.x - cur.x, start.y - cur.y) < 14) {
+          closeClickHandledAtRef.current = Date.now();
           setExclusions(prev => [...prev, s.currentExclusion]);
           setCurrentExclusion([]);
           return;
@@ -584,6 +600,7 @@ export default function GardenSizer() {
 
   function onMapDblClick(e: mapboxgl.MapMouseEvent) {
     e.preventDefault();
+    if (Date.now() - closeClickHandledAtRef.current < 350) return;
     const s = stateRef.current;
     if (s.mode === "draw" && s.main.length >= 3 && !s.mainClosed) setMainClosed(true);
     else if (s.mode === "draw" && s.mainClosed && s.currentLawn.length >= 3) {
@@ -600,23 +617,26 @@ export default function GardenSizer() {
     if (s.mode !== "edit") return;
     const map = mapRef.current!;
     const feats = map.queryRenderedFeatures(e.point, { layers: ["vertices-circle"] });
-    const real = feats.find(f => !(f.properties as any)?.midpoint);
+    const real = feats.find(f => featureProps(f).midpoint !== true);
     if (!real) return;
     e.preventDefault();
-    const ring = (real.properties as any).ring as EditableRingId;
-    const idx = (real.properties as any).idx as number;
-    deleteVertex(ring, idx);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(20);
+    const props = featureProps(real);
+    const ring = editableRingIdFromUnknown(props.ring);
+    const idx = finiteNumber(props.idx);
+    if (ring && idx != null) deleteVertex(ring, idx);
+    vibrateDevice(20);
   }
 
   function onMapMouseDown(e: mapboxgl.MapMouseEvent) {
     const s = stateRef.current; if (s.mode !== "edit") return;
     const map = mapRef.current!;
     const feats = map.queryRenderedFeatures(e.point, { layers: ["vertices-circle"] });
-    const real = feats.find(f => !(f.properties as any)?.midpoint);
+    const real = feats.find(f => featureProps(f).midpoint !== true);
     if (!real) return;
-    const ring = (real.properties as any).ring as EditableRingId;
-    const idx = (real.properties as any).idx as number;
+    const props = featureProps(real);
+    const ring = editableRingIdFromUnknown(props.ring);
+    const idx = finiteNumber(props.idx);
+    if (!ring || idx == null) return;
     setDraggingVertex({ ring, idx });
     map.dragPan.disable();
     e.preventDefault();
@@ -645,13 +665,23 @@ export default function GardenSizer() {
     if (draggingVertex) map.dragPan.disable(); else map.dragPan.enable();
   }, [draggingVertex]);
 
+  useEffect(() => {
+    const releaseDrag = () => setDraggingVertex(null);
+    window.addEventListener("pointerup", releaseDrag);
+    window.addEventListener("pointercancel", releaseDrag);
+    return () => {
+      window.removeEventListener("pointerup", releaseDrag);
+      window.removeEventListener("pointercancel", releaseDrag);
+    };
+  }, []);
+
   // ----- Sync map sources with state -----
   function syncMap() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
     // Lawn polygons (completed rings plus the live ring currently being drawn)
-    const polyData: any = { type: "FeatureCollection", features: [] };
+    const polyData = emptyFeatureCollection();
     if (mainClosed && main.length >= 3) {
       [main, ...additionalLawns].forEach((r, i) => {
         polyData.features.push({
@@ -677,7 +707,7 @@ export default function GardenSizer() {
     (map.getSource("polygon") as mapboxgl.GeoJSONSource)?.setData(polyData);
 
     // Exclusions
-    const exclData: any = { type: "FeatureCollection", features: [] };
+    const exclData = emptyFeatureCollection();
     exclusions.forEach(r => exclData.features.push({
       type: "Feature", properties: {},
       geometry: { type: "Polygon", coordinates: [[...r, r[0]]] },
@@ -692,7 +722,7 @@ export default function GardenSizer() {
     (map.getSource("exclusions") as mapboxgl.GeoJSONSource)?.setData(exclData);
 
     // Vertices (real + midpoints in edit mode)
-    const vData: any = { type: "FeatureCollection", features: [] };
+    const vData = emptyFeatureCollection();
     const pushRing = (r: Ring, ringId: string) => {
       r.forEach((p, i) => vData.features.push({
         type: "Feature", properties: { ring: ringId, idx: i, midpoint: false },
@@ -717,7 +747,7 @@ export default function GardenSizer() {
     (map.getSource("vertices") as mapboxgl.GeoJSONSource)?.setData(vData);
 
     // Edge labels for the active drawing ring or all completed lawns in edit mode.
-    const labelData: any = { type: "FeatureCollection", features: [] };
+    const labelData = emptyFeatureCollection();
     const pushLabels = (sourceRing: Ring, closedRing: boolean) => {
       if (sourceRing.length < 2) return;
       const ring = closedRing ? [...sourceRing, sourceRing[0]] : sourceRing;
@@ -740,7 +770,7 @@ export default function GardenSizer() {
     (map.getSource("edge-labels") as mapboxgl.GeoJSONSource)?.setData(labelData);
 
     // Matrikel
-    const matrData: any = { type: "FeatureCollection", features: [] };
+    const matrData = emptyFeatureCollection();
     if (matrikel && matrikel.length >= 3) {
       matrData.features.push({
         type: "Feature", properties: {},
@@ -750,12 +780,12 @@ export default function GardenSizer() {
     (map.getSource("matrikel") as mapboxgl.GeoJSONSource)?.setData(matrData);
 
     // Snap indicator
-    const snapData: any = { type: "FeatureCollection", features: [] };
+    const snapData = emptyFeatureCollection();
     if (snapIndicator) snapData.features.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: snapIndicator } });
     (map.getSource("snap") as mapboxgl.GeoJSONSource)?.setData(snapData);
 
     // Wand area preview / analyzed bbox
-    const wandData: any = { type: "FeatureCollection", features: [] };
+    const wandData = emptyFeatureCollection();
     const previewBbox = mode === "wand" && wandHoverPos ? (() => {
       const half = WAND_CROP_METERS / 2;
       const lat = half / 111320; const lng = half / (111320 * Math.cos(wandHoverPos[1] * Math.PI / 180));
@@ -770,8 +800,8 @@ export default function GardenSizer() {
     }
     (map.getSource("wand-area") as mapboxgl.GeoJSONSource)?.setData(wandData);
 
-    const wandPreviewData: any = { type: "FeatureCollection", features: [] };
-    const wandPreviewExclusionsData: any = { type: "FeatureCollection", features: [] };
+    const wandPreviewData = emptyFeatureCollection();
+    const wandPreviewExclusionsData = emptyFeatureCollection();
     if (mode === "wand" && wandPreview?.polygon?.length >= 3) {
       const closeRing = (r: Ring) => [...r, r[0]];
       wandPreviewData.features.push({
@@ -792,19 +822,22 @@ export default function GardenSizer() {
     (map.getSource("wand-preview-exclusions") as mapboxgl.GeoJSONSource)?.setData(wandPreviewExclusionsData);
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { syncMap(); }, [main, mainClosed, additionalLawns, currentLawn, exclusions, currentExclusion, hover, mode, matrikel, snapIndicator, wandHoverPos, wandBbox, wandPreview]);
 
   // ----- Area / perimeter (multiple lawns with exclusions subtracted) -----
   const { area, perim, lawnAreas } = useMemo(() => {
     const areas = completedLawns.map((ring) => {
-      let poly: any = turf.polygon([[...ring, ring[0]]]);
+      let poly: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> = turf.polygon([[...ring, ring[0]]]);
       exclusions.forEach(r => {
         if (r.length < 3) return;
         try {
           const ex = turf.polygon([[...r, r[0]]]);
-          const diff = turf.difference(turf.featureCollection([poly, ex]) as any);
+          const diff = turf.difference(turf.featureCollection([poly, ex]));
           if (diff) poly = diff;
-        } catch {}
+        } catch {
+          /* Ignore invalid exclusion geometry for the live area estimate. */
+        }
       });
       return turf.area(poly);
     });
@@ -825,9 +858,31 @@ export default function GardenSizer() {
     matrikel,
     areaM2: area > 0 ? Math.round(area) : null,
   }), [area, chosen?.center, chosen?.name, completedLawns, editingGarden?.id, editingGarden?.name, exclusions, matrikel]);
-  const activeDepthModel = savedDepthModel ?? generatedDepthModel;
+  const currentGeometryFingerprint = useMemo(() => gardenGeometryFingerprint({
+    name: chosen?.name ?? editingGarden?.name ?? null,
+    center: chosen?.center ?? null,
+    lawns: completedLawns,
+    exclusions,
+    matrikel,
+    imagery,
+    areaM2: area > 0 ? area : null,
+  }), [area, chosen?.center, chosen?.name, completedLawns, editingGarden?.name, exclusions, imagery, matrikel]);
+  const savedDepthModelIsFresh = Boolean(savedDepthModel && savedGeometryFingerprint === currentGeometryFingerprint);
+  const activeDepthModel = savedDepthModelIsFresh ? savedDepthModel : generatedDepthModel;
+  const lastGeometryFingerprintRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastGeometryFingerprintRef.current) {
+      lastGeometryFingerprintRef.current = currentGeometryFingerprint;
+      return;
+    }
+    if (lastGeometryFingerprintRef.current !== currentGeometryFingerprint) {
+      setScanLaunch(null);
+      lastGeometryFingerprintRef.current = currentGeometryFingerprint;
+    }
+  }, [currentGeometryFingerprint]);
   const depthObjectCount = activeDepthModel?.objects.length ?? 0;
   const canStartNewScan = scanCanStartNewSession(scanSessions);
+  const canStartScanFromGeometry = Boolean(generatedDepthModel) && !saving && !startingScan;
   const scanActionLabel = startingScan || saving
     ? "Klargør scan..."
     : !generatedDepthModel
@@ -870,7 +925,9 @@ export default function GardenSizer() {
         historyRef.current.past.push(JSON.parse(lastSerialized.current));
         if (historyRef.current.past.length > 50) historyRef.current.past.shift();
         historyRef.current.future = [];
-      } catch {}
+      } catch {
+        /* Ignore malformed in-memory history snapshots. */
+      }
     }
     lastSerialized.current = ser;
   }, [main, mainClosed, additionalLawns, currentLawn, exclusions]);
@@ -879,6 +936,7 @@ export default function GardenSizer() {
     setMain([]); setMainClosed(false); setAdditionalLawns([]); setCurrentLawn([]); setExclusions([]); setCurrentExclusion([]);
     setWandConfidence(null); setWandBbox(null); clearWandPreview();
     setSavedDepthModel(null); setScanLaunch(null); setScanSessions([]); setMapView("map");
+    setSavedGeometryFingerprint(null);
   }
 
   function refreshDepthPreview() {
@@ -887,6 +945,7 @@ export default function GardenSizer() {
       return;
     }
     setSavedDepthModel(generatedDepthModel);
+    setSavedGeometryFingerprint(currentGeometryFingerprint);
     setMapView("twin");
     toast.success("Flad 3D-preview vist", {
       description: "Dette er kun plænefladen fra 2D-kortet. Højder og forhindringer kræver mobilscan.",
@@ -908,9 +967,9 @@ export default function GardenSizer() {
     if (!error) setScanSessions((data ?? []) as GardenScanSession[]);
   }
 
-  async function saveGardenForScan(): Promise<SavedGarden | null> {
+  async function persistMeasurement({ includeThumbnail }: { includeThumbnail: boolean }): Promise<{ garden: SavedGarden; depthModel: GardenDepthModel; softWarnings: string[] } | null> {
     if (!user) {
-      requireLoginForHavemaaler("Log ind for at starte mobilscan");
+      requireLoginForHavemaaler(includeThumbnail ? "Log ind for at gemme din have" : "Log ind for at starte mobilscan");
       return null;
     }
     if (!chosen || area === 0 || !generatedDepthModel) {
@@ -919,15 +978,33 @@ export default function GardenSizer() {
     }
     setSaving(true);
     try {
-      const gardenPolygon = completedLawns.length === 1
-        ? polygonForRing(completedLawns[0])
-        : { type: "MultiPolygon", coordinates: completedLawns.map((ring) => [[...ring, ring[0]]]) };
+      let thumbnail_url: string | null = editingGarden?.thumbnail_url ?? null;
+      if (includeThumbnail) {
+        try {
+          const map = mapRef.current;
+          if (map) {
+            const dataUrl = map.getCanvas().toDataURL("image/jpeg", 0.78);
+            const blob = await (await fetch(dataUrl)).blob();
+            const path = `${user.id}/${Date.now()}.jpg`;
+            const { error: upErr } = await supabase.storage.from("garden-thumbnails").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+            if (!upErr) {
+              const { data: pub } = supabase.storage.from("garden-thumbnails").getPublicUrl(path);
+              thumbnail_url = pub.publicUrl;
+            }
+          }
+        } catch {
+          // Thumbnail is a visual convenience; persistence must still succeed without it.
+        }
+      }
+
+      const gardenPolygon = polygonForRings(completedLawns);
       const depthModelForSave = {
         ...generatedDepthModel,
         gardenId: editingGarden?.id ?? generatedDepthModel.gardenId ?? null,
         name: chosen.name.split(",")[0],
         generatedAt: new Date().toISOString(),
       };
+      const fingerprint = currentGeometryFingerprint;
       const depthModelUpdatedAt = new Date().toISOString();
       const gardenPayloadBase = {
         name: chosen.name.split(",")[0],
@@ -936,9 +1013,9 @@ export default function GardenSizer() {
         longitude: chosen.center[0],
         area_m2: Math.round(area),
         polygon: gardenPolygon,
-        exclusions: exclusions.map(r => ({ type: "Polygon", coordinates: [[...r, r[0]]] })),
+        exclusions: serializeExclusions(exclusions),
         imagery_source: imagery,
-        thumbnail_url: editingGarden?.thumbnail_url ?? null,
+        thumbnail_url,
       };
       const gardenPayloadWithDepth = {
         ...gardenPayloadBase,
@@ -987,8 +1064,8 @@ export default function GardenSizer() {
       }
 
       if (saveError || !garden) {
-        console.error("saveGardenForScan failed", saveError);
-        toast.error("Kunne ikke gemme haven før mobilscan", {
+        console.error("persistMeasurement failed", saveError);
+        toast.error("Kunne ikke gemme have", {
           description: describeSupabaseError(saveError) ?? "Prøv igen om lidt.",
         });
         return null;
@@ -1013,25 +1090,23 @@ export default function GardenSizer() {
 
       const zoneError = await syncLawnZones(savedGarden.id, Boolean(editingGarden));
       if (zoneError) {
-        console.warn("saveGardenForScan lawn zone sync failed", zoneError);
+        console.warn("persistMeasurement lawn zone sync failed", zoneError);
         softWarnings.push("Plænezonen gemmes igen efter scan.");
       }
 
       setEditingGarden(savedGarden);
       setSavedDepthModel(depthModelWithGardenId);
+      setSavedGeometryFingerprint(fingerprint);
       setActive(savedGarden.id);
-      try { localStorage.removeItem(AUTOSAVE_KEY); } catch {}
-      if (softWarnings.length) {
-        toast.success("Have gemt. Starter mobilscan...", {
-          description: softWarnings.join(" "),
-        });
-      } else {
-        toast.success("Have gemt. Starter mobilscan...");
+      try {
+        localStorage.removeItem(AUTOSAVE_KEY);
+      } catch {
+        /* Local draft cleanup is best effort. */
       }
-      return savedGarden;
+      return { garden: savedGarden, depthModel: depthModelWithGardenId, softWarnings };
     } catch (error) {
-      console.error("saveGardenForScan crashed", error);
-      toast.error("Kunne ikke gemme haven før mobilscan", {
+      console.error("persistMeasurement crashed", error);
+      toast.error("Kunne ikke gemme have", {
         description: describeSupabaseError(error) ?? "Prøv igen om lidt.",
       });
       return null;
@@ -1040,7 +1115,17 @@ export default function GardenSizer() {
     }
   }
 
+  async function saveGardenForScan(): Promise<SavedGarden | null> {
+    const result = await persistMeasurement({ includeThumbnail: false });
+    if (!result) return null;
+    toast.success("Have gemt. Starter mobilscan...", {
+      description: result.softWarnings.length ? result.softWarnings.join(" ") : undefined,
+    });
+    return result.garden;
+  }
+
   async function startGardenScan() {
+    if (startingScan || saving) return;
     if (!generatedDepthModel) {
       toast("Haven mangler en lukket græsflade");
       return;
@@ -1181,13 +1266,22 @@ export default function GardenSizer() {
     try {
       const r = await fetch(url, { headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } });
       const j = await r.json();
-      const feat = j?.features?.[0];
-      const coords = feat?.geometry?.coordinates;
-      if (!coords) { if (!opts.silent) toast("Ingen matrikel fundet"); return; }
-      const outer: LngLat[] = (coords[0][0] && Array.isArray(coords[0][0][0])) ? coords[0][0] : coords[0];
-      setMatrikel(outer.map((p: any) => [p[0], p[1]]));
+      const features = recordOrNull(j)?.features;
+      const firstFeature = Array.isArray(features) ? recordOrNull(features[0]) : null;
+      const geometry = recordOrNull(firstFeature?.geometry);
+      const coords = geometry?.coordinates;
+      const firstLevel = Array.isArray(coords) ? coords[0] : null;
+      const firstRingCandidate = Array.isArray(firstLevel) ? firstLevel[0] : null;
+      const outerSource = Array.isArray(firstRingCandidate) && Array.isArray(firstRingCandidate[0])
+        ? firstRingCandidate
+        : firstLevel;
+      const outer = normalizeRing(outerSource);
+      if (!outer) { if (!opts.silent) toast("Ingen matrikel fundet"); return; }
+      setMatrikel(outer);
       if (!opts.silent) toast.success("Matrikel hentet");
-    } catch { if (!opts.silent) toast.error("Matrikel-opslag fejlede"); }
+    } catch {
+      if (!opts.silent) toast.error("Matrikel-opslag fejlede");
+    }
   }
 
   function useMatrikelAsBase() {
@@ -1197,9 +1291,13 @@ export default function GardenSizer() {
   }
 
   // ----- Magic wand (deterministic lawn segmentation) -----
-  function showWandFailure(data: any, response?: Response) {
-    const code = String(data?.error || "");
-    const msg = String(data?.detail || data?.error || response?.statusText || "");
+  function showWandFailure(data: unknown, response?: Response) {
+    const record = recordOrNull(data);
+    const code = stringOrFallback(record?.error);
+    const msg = stringOrFallback(record?.detail)
+      || stringOrFallback(record?.error)
+      || response?.statusText
+      || "";
     logHavemaalerSegmentationEvent("havemaaler_wand_failure", null, null, [], {
       errorCode: code || String(response?.status ?? "unknown"),
       errorDetail: msg,
@@ -1331,8 +1429,9 @@ export default function GardenSizer() {
         await recomputeWandSegmentation(crop, seeds);
       }
       completed = true;
-    } catch (e: any) {
-      toast.error(e?.name === "AbortError" ? "Billedhentning tog for lang tid — prøv igen om lidt" : "Kunne ikke analysere plænen");
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === "AbortError";
+      toast.error(isAbort ? "Billedhentning tog for lang tid — prøv igen om lidt" : "Kunne ikke analysere plænen");
     } finally {
       setWandLoading(false);
       if (!completed) setWandStage("idle");
@@ -1457,6 +1556,7 @@ export default function GardenSizer() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, mode, main, mainClosed, currentLawn, currentExclusion, exclusions, wandPreview]);
 
   // ----- Autosave to localStorage -----
@@ -1467,7 +1567,9 @@ export default function GardenSizer() {
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
           chosen, main, mainClosed, additionalLawns, currentLawn, exclusions, imagery, savedAt: Date.now(),
         }));
-      } catch {}
+      } catch {
+        /* Autosave can fail in private browsing or full storage; drawing still works. */
+      }
     }, 800);
     return () => clearTimeout(t);
   }, [step, chosen, main, mainClosed, additionalLawns, currentLawn, exclusions, imagery, editingGarden]);
@@ -1488,13 +1590,16 @@ export default function GardenSizer() {
       if (d.imagery) setImagery(d.imagery);
       setStep(2);
       toast("Gendannet kladde", { description: "Din tidligere måling er hentet frem" });
-    } catch {}
+    } catch {
+      /* Ignore malformed or inaccessible local drafts. */
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!gardenIdParam) {
       setEditingGarden(null);
+      setSavedGeometryFingerprint(null);
       return;
     }
     if (!user) return;
@@ -1502,8 +1607,8 @@ export default function GardenSizer() {
     let cancelled = false;
     async function loadSavedGarden() {
       setLoadingSavedGarden(true);
-      const gardenFieldsWithDepth = "id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url, depth_model, depth_model_updated_at";
-      const gardenFieldsBase = "id, name, address, latitude, longitude, polygon, exclusions, imagery_source, thumbnail_url";
+      const gardenFieldsWithDepth = "id, name, address, latitude, longitude, area_m2, polygon, exclusions, imagery_source, thumbnail_url, depth_model, depth_model_updated_at";
+      const gardenFieldsBase = "id, name, address, latitude, longitude, area_m2, polygon, exclusions, imagery_source, thumbnail_url";
       const gardenQuery = supabase
         .from("gardens")
         .select(gardenFieldsWithDepth)
@@ -1559,18 +1664,29 @@ export default function GardenSizer() {
       }
 
       const label = savedGarden.address || savedGarden.name || "Min have";
+      const savedExclusions = exclusionRingsFromJson(savedGarden.exclusions);
+      const savedImagery = savedGarden.imagery_source === "mapbox" ? "mapbox" : "ortofoto";
       setEditingGarden(savedGarden);
       setActive(savedGarden.id);
       setChosen({ name: label, center });
       setQuery(label);
       setCompletedLawnRings(savedRings);
-      setExclusions(exclusionRingsFromJson(savedGarden.exclusions));
+      setExclusions(savedExclusions);
       setCurrentExclusion([]);
       setMatrikel(null);
       setSavedDepthModel(coerceGardenDepthModel(savedGarden.depth_model));
+      setSavedGeometryFingerprint(gardenGeometryFingerprint({
+        name: label,
+        center,
+        lawns: savedRings,
+        exclusions: savedExclusions,
+        matrikel: null,
+        imagery: savedImagery,
+        areaM2: savedGarden.area_m2,
+      }));
       setScanLaunch(null);
       clearWandPreview();
-      setImagery(savedGarden.imagery_source === "mapbox" ? "mapbox" : "ortofoto");
+      setImagery(savedImagery);
       setMode("edit");
       setMapView("map");
       setStep(2);
@@ -1585,10 +1701,6 @@ export default function GardenSizer() {
   }, [gardenIdParam, user?.id, setActive]);
 
   // ----- Save -----
-  function polygonForRing(ring: Ring) {
-    return { type: "Polygon", coordinates: [[...ring, ring[0]]] };
-  }
-
   async function syncLawnZones(gardenId: string, updateExisting: boolean) {
     const zoneRows = completedLawns.map((ring, i) => ({
       user_id: user!.id,
@@ -1640,127 +1752,11 @@ export default function GardenSizer() {
   }
 
   async function saveGarden() {
-    if (!chosen || area === 0) return;
-    if (!user) { requireLoginForHavemaaler("Log ind for at gemme din have"); return; }
-    setSaving(true);
-
-    // Thumbnail upload
-    let thumbnail_url: string | null = editingGarden?.thumbnail_url ?? null;
-    try {
-      const map = mapRef.current!;
-      const dataUrl = map.getCanvas().toDataURL("image/jpeg", 0.78);
-      const blob = await (await fetch(dataUrl)).blob();
-      const path = `${user.id}/${Date.now()}.jpg`;
-      const { error: upErr } = await supabase.storage.from("garden-thumbnails").upload(path, blob, { contentType: "image/jpeg", upsert: true });
-      if (!upErr) {
-        const { data: pub } = supabase.storage.from("garden-thumbnails").getPublicUrl(path);
-        thumbnail_url = pub.publicUrl;
-      }
-    } catch {}
-
-    const gardenPolygon = completedLawns.length === 1
-      ? polygonForRing(completedLawns[0])
-      : { type: "MultiPolygon", coordinates: completedLawns.map((ring) => [[...ring, ring[0]]]) };
-    const depthModelForSave = generatedDepthModel
-      ? {
-        ...generatedDepthModel,
-        gardenId: editingGarden?.id ?? generatedDepthModel.gardenId ?? null,
-        name: chosen.name.split(",")[0],
-        generatedAt: new Date().toISOString(),
-      }
-      : null;
-
-    const depthModelUpdatedAt = new Date().toISOString();
-    const gardenPayloadBase = {
-      name: chosen.name.split(",")[0],
-      address: chosen.name,
-      latitude: chosen.center[1],
-      longitude: chosen.center[0],
-      area_m2: Math.round(area),
-      polygon: gardenPolygon,
-      exclusions: exclusions.map(r => ({ type: "Polygon", coordinates: [[...r, r[0]]] })),
-      imagery_source: imagery,
-      thumbnail_url,
-    };
-    const gardenPayloadWithDepth = {
-      ...gardenPayloadBase,
-      depth_model: depthModelForSave ? depthModelToJson(depthModelForSave) : null,
-      depth_model_updated_at: depthModelForSave ? depthModelUpdatedAt : null,
-    };
-
-    let savedGardenRecord: unknown = null;
-    let saveError: unknown = null;
-    let depthColumnsAvailable = true;
-    const saveWithDepthResult = editingGarden
-      ? await supabase
-        .from("gardens")
-        .update(gardenPayloadWithDepth)
-        .eq("id", editingGarden.id)
-        .eq("user_id", user.id)
-        .select()
-        .single()
-      : await supabase.from("gardens").insert({
-        user_id: user.id,
-        ...gardenPayloadWithDepth,
-      }).select().single();
-
-    savedGardenRecord = saveWithDepthResult.data;
-    saveError = saveWithDepthResult.error;
-
-    if ((saveError || !savedGardenRecord) && isDepthModelSchemaError(saveError)) {
-      depthColumnsAvailable = false;
-      console.warn("saveGarden retrying without depth preview fields", saveError);
-      const saveCoreResult = editingGarden
-        ? await supabase
-          .from("gardens")
-          .update(gardenPayloadBase)
-          .eq("id", editingGarden.id)
-          .eq("user_id", user.id)
-          .select()
-          .single()
-        : await supabase.from("gardens").insert({
-          user_id: user.id,
-          ...gardenPayloadBase,
-        }).select().single();
-      savedGardenRecord = saveCoreResult.data;
-      saveError = saveCoreResult.error;
-    }
-
-    if (saveError || !savedGardenRecord) {
-      console.error("saveGarden failed", saveError);
-      toast.error("Kunne ikke gemme have", {
-        description: describeSupabaseError(saveError) ?? "Prøv igen om lidt.",
-      });
-      setSaving(false);
-      return;
-    }
-
-    const g = savedGardenRecord as SavedGarden;
-    const softWarnings: string[] = [];
-    if (!editingGarden && depthModelForSave && depthColumnsAvailable) {
-      const depthModelWithGardenId = { ...depthModelForSave, gardenId: g.id };
-      const { error: depthError } = await supabase.from("gardens").update({
-        depth_model: depthModelToJson(depthModelWithGardenId),
-        depth_model_updated_at: new Date().toISOString(),
-      }).eq("id", g.id).eq("user_id", user.id);
-      if (depthError) {
-        console.warn("saveGarden depth model update failed", depthError);
-        softWarnings.push("3D-preview gemmes efter selve scanningen.");
-      }
-      setSavedDepthModel(depthModelWithGardenId);
-    } else {
-      if (depthModelForSave && !depthColumnsAvailable) {
-        softWarnings.push("3D-preview gemmes efter selve scanningen.");
-      }
-      setSavedDepthModel(depthModelForSave);
-    }
-    const zoneError = await syncLawnZones(g.id, Boolean(editingGarden));
-    if (zoneError) { toast.error("Have gemt, men zonerne kunne ikke gemmes"); setSaving(false); return; }
-    setActive(g.id);
-    try { localStorage.removeItem(AUTOSAVE_KEY); } catch {}
+    const result = await persistMeasurement({ includeThumbnail: true });
+    if (!result) return;
     toast.success(editingGarden ? "Måling opdateret" : "Have gemt", {
       action: { label: "Åbn Havekompagnon", onClick: () => navigate("/havekompagnon") },
-      description: softWarnings.length ? softWarnings.join(" ") : undefined,
+      description: result.softWarnings.length ? result.softWarnings.join(" ") : undefined,
       duration: 6000,
     });
     navigate(returnTo ?? (editingGarden ? "/havekompagnon" : "/konto"));
@@ -1961,7 +1957,7 @@ export default function GardenSizer() {
                   {mapView === "map" && (
                   <div className="tools measurement-tools" style={{ zIndex: 2, flexWrap: "wrap" }}>
                     {mainClosed && (
-                      <button className="tool-btn scan-primary mobile-scan-tool" onClick={startGardenScan} disabled={startingScan || saving} title="Start mobilscan">
+                      <button className="tool-btn scan-primary mobile-scan-tool" onClick={startGardenScan} disabled={!canStartScanFromGeometry} title="Start mobilscan">
                         {startingScan || saving ? "Klargør..." : editingGarden?.id ? "Scan 3D" : "Gem & scan"}
                       </button>
                     )}
@@ -1985,7 +1981,7 @@ export default function GardenSizer() {
                 </div>
 
                 <div className="map-secondary-actions" style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                  <button className="tool-btn scan-primary" onClick={startGardenScan} disabled={startingScan || saving}>
+                  <button className="tool-btn scan-primary" onClick={startGardenScan} disabled={!canStartScanFromGeometry}>
                     {scanActionLabel}
                   </button>
                   <button className="tool-btn" onClick={() => loadMatrikel()}>Hent matrikel</button>
@@ -2041,7 +2037,7 @@ export default function GardenSizer() {
                   scanLaunch={scanLaunch}
                   starting={startingScan || saving}
                   canPreview={Boolean(generatedDepthModel)}
-                  canStartScan
+                  canStartScan={canStartScanFromGeometry}
                   scanButtonLabel={scanPanelButtonLabel}
                   onBuildPreview={refreshDepthPreview}
                   onStartScan={startGardenScan}

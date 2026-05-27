@@ -83,8 +83,11 @@ Deno.serve(async (req) => {
     if (gardenError) return json({ error: gardenError.message }, 500);
     if (!garden) return json({ error: "garden_not_found" }, 404);
 
+    const source = typeof body.source === "string" && body.source.trim()
+      ? body.source.trim().slice(0, 80)
+      : "havemaaler";
     const captureMetadata = {
-      requested_from: typeof body.source === "string" ? body.source : "havemaaler",
+      requested_from: source,
       requested_at: new Date().toISOString(),
       pipeline_version: PIPELINE_VERSION,
       capture_mode: "guided_center_route",
@@ -121,6 +124,7 @@ Deno.serve(async (req) => {
       .insert({
         user_id: user.id,
         garden_id: gardenId,
+        source,
         status: "created",
         device_model: typeof body.device_model === "string" ? body.device_model : null,
         device_capabilities: objectOrEmpty(body.device_capabilities),

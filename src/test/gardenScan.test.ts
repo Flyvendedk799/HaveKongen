@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   inspectScanManifest,
+  latestUsefulScan,
   MIN_ROUTE_STEPS,
+  scanCanStartNewSession,
+  scanEvidenceSummary,
   type GardenScanManifest,
+  type GardenScanSession,
 } from "@/lib/gardenScan";
 
 function routeStep(index: number) {
@@ -86,4 +90,80 @@ describe("garden scan manifest route gates", () => {
     expect(result.ready).toBe(false);
     expect(result.issues.some((issue) => issue.code === "route_incomplete" && issue.severity === "error")).toBe(true);
   });
+
+  it("warns about weak manual anchors without blocking completed route uploads", () => {
+    const result = inspectScanManifest(manifest({
+      anchors: [
+        { id: "a1", mapLngLat: [12, 55], imagePoint: { x: 0.2, y: 0.4 } },
+        { id: "a2", mapLngLat: [12, 55], imagePoint: { x: 0.7, y: 0.4 } },
+      ],
+    }));
+
+    expect(result.ready).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "weak_anchor_spread" && issue.severity === "warning")).toBe(true);
+  });
+
+  it("summarizes route-first evidence from a scan session", () => {
+    const session = scanSession({
+      status: "uploaded",
+      upload_prefix: "user/session",
+      capture_metadata: {
+        keyframe_count: 12,
+        route_step_count: MIN_ROUTE_STEPS,
+        completed_route_steps: MIN_ROUTE_STEPS,
+      },
+      warnings: ["manual_anchors_missing"],
+    });
+
+    const summary = scanEvidenceSummary(session);
+
+    expect(summary.readyToUpload).toBe(true);
+    expect(summary.routeReady).toBe(true);
+    expect(summary.keyframesReady).toBe(true);
+    expect(summary.alignableAnchorCount).toBe(0);
+    expect(summary.warningCodes).toEqual(["manual_anchors_missing"]);
+  });
+
+  it("prefers active sessions and blocks duplicate non-terminal scans", () => {
+    const ready = scanSession({ id: "ready", status: "ready" });
+    const uploaded = scanSession({ id: "uploaded", status: "uploaded" });
+    const active = scanSession({ id: "active", status: "capturing" });
+
+    expect(latestUsefulScan([uploaded, ready, active])?.id).toBe("active");
+    expect(scanCanStartNewSession([ready])).toBe(true);
+    expect(scanCanStartNewSession([ready, active])).toBe(false);
+  });
 });
+
+function scanSession(overrides: Partial<GardenScanSession> = {}): GardenScanSession {
+  return {
+    id: "session-1",
+    user_id: "user-1",
+    garden_id: "garden-1",
+    created_at: "2026-05-24T00:00:00.000Z",
+    updated_at: "2026-05-24T00:00:00.000Z",
+    last_status_at: "2026-05-24T00:00:00.000Z",
+    media_retention_until: "2026-06-07T00:00:00.000Z",
+    anchors: [],
+    capture_metadata: {},
+    confidence: null,
+    device_capabilities: {},
+    device_model: null,
+    error_code: null,
+    error_detail: null,
+    manifest_path: null,
+    capture_client_version: null,
+    pipeline_version: "garden-twin-v1",
+    processing_attempts: 0,
+    processing_finished_at: null,
+    processing_started_at: null,
+    source: "havemaaler",
+    result_json: null,
+    status: "created",
+    status_history: [],
+    upload_prefix: null,
+    warnings: [],
+    claimed_by: null,
+    ...overrides,
+  };
+}

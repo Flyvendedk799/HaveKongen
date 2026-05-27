@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import { useIsMobile } from "@/hooks/use-mobile";
 import "./pinpoint.css";
 
 type LngLat = [number, number];
+type SparkStyle = CSSProperties & Record<"--a" | "--d" | "--dist", string>;
 
 type Stage =
   | "intro"
@@ -103,6 +104,11 @@ function prewarmOrtoTiles(template: string | null, center: [number, number]) {
   }
 }
 
+function vibrateDevice(durationMs: number) {
+  const nav = navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean };
+  nav.vibrate?.(durationMs);
+}
+
 export default function PinpointSequence({ address, center, mapboxToken, ortoWmsTemplate, onDone }: Props) {
   const [stage, setStage] = useState<Stage>("intro");
   const [calmDown, setCalmDown] = useState(false); // start hiding HUD/atmosphere before map fade
@@ -138,7 +144,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
 
   // Build dual-source style: satellite (global) + ortofoto (DK), zoom-cross-faded
   function buildStyle(): mapboxgl.Style {
-    const sources: any = {
+    const sources: mapboxgl.Style["sources"] = {
       sat: {
         type: "raster",
         tiles: [
@@ -149,9 +155,9 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
         maxzoom: 22,
       },
     };
-    // Cap satellite at z19 so Mapbox doesn't request overzoomed/stretched tiles
-    sources.sat.maxzoom = 19;
-    const layers: any[] = [
+    // The source itself caps satellite at z19 so Mapbox does not request
+    // overzoomed/stretched tiles.
+    const layers: mapboxgl.AnyLayer[] = [
       {
         id: "sat-layer",
         type: "raster",
@@ -185,7 +191,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
         },
       });
     }
-    return { version: 8, sources, layers } as any;
+    return { version: 8, sources, layers };
   }
 
   // Mount Mapbox — deferred to next frame so the overlay paints first
@@ -218,7 +224,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
         setMapReady((n) => n + 1);
       });
       // store inner raf so we can cancel it
-      (rafRef.current as any) = raf2;
+      rafRef.current = raf2;
     });
     rafRef.current = raf1;
 
@@ -226,7 +232,11 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
       cancelled = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       clearTimers();
-      try { map?.remove(); } catch {}
+      try {
+        map?.remove();
+      } catch {
+        /* Mapbox can already be disposed during fast route changes. */
+      }
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,9 +247,11 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     const map = mapRef.current; if (!map) return;
     const update = () => {
       try {
-        const p = map.project(center as any);
+        const p = map.project(center);
         setPinPx({ x: p.x, y: p.y });
-      } catch {}
+      } catch {
+        /* Projection can fail briefly while the map is swapping styles. */
+      }
     };
     update();
     map.on("move", update);
@@ -328,7 +340,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
 
             at(dropStart + T.dropDur, () => {
               setStage("impact");
-              if ((navigator as any).vibrate) (navigator as any).vibrate(10);
+              vibrateDevice(10);
             });
 
             at(dropStart + T.dropDur + T.impactDur, async () => {
@@ -361,6 +373,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const shake = stage === "impact";
@@ -423,10 +436,10 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
                   key={i}
                   className="pp-spark"
                   style={{
-                    ["--a" as any]: `${(i / 14) * 360}deg`,
-                    ["--d" as any]: `${(i % 5) * 0.04}s`,
-                    ["--dist" as any]: `${70 + (i % 3) * 30}px`,
-                  } as React.CSSProperties}
+                    "--a": `${(i / 14) * 360}deg`,
+                    "--d": `${(i % 5) * 0.04}s`,
+                    "--dist": `${70 + (i % 3) * 30}px`,
+                  } as SparkStyle}
                 />
               ))}
             </div>

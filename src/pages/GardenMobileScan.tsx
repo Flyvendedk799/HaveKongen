@@ -231,6 +231,12 @@ function readRouteProgress(metadata: unknown): GardenScanRouteObservation[] {
     .slice(0, ROUTE_STEPS.length);
 }
 
+function captureStateForStatus(status: string): CaptureState {
+  if (status === "uploaded" || status === "processing" || status === "ready") return "uploaded";
+  if (status === "failed" || status === "cancelled") return "error";
+  return "ready";
+}
+
 function boundsForMap(frame: AnchorMapFrame | null, targets: AnchorTarget[]) {
   const points = [
     ...(frame?.localBoundary ?? []),
@@ -399,6 +405,11 @@ export default function GardenMobileScan() {
   const selectedAnchor = anchorTargets.find((candidate) => candidate.id === selectedAnchorId) ?? null;
   const hasMapAnchorTargets = anchorTargets.some((target) => Boolean(target.mapLngLat && target.local));
   const currentStatus = session?.status ?? "created";
+  const uploadedStateTitle = currentStatus === "ready"
+    ? "3D-model klar"
+    : currentStatus === "processing"
+      ? "Rekonstruktion i gang"
+      : "Scan modtaget";
   const currentRouteStep = ROUTE_STEPS.find((step) => !routeProgress.some((done) => done.id === step.id)) ?? null;
   const routeProgressLabel = `${Math.min(routeProgress.length, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS}`;
   const uploadBlockedReason = !routeReady
@@ -426,7 +437,9 @@ export default function GardenMobileScan() {
           ? "Bliv ved med langsom bevægelse, så kameraet samler flere vinkler automatisk."
           : "Scan er klar til upload. Manuelle ankre er kun et plus.";
   const footerHint = state === "uploaded"
-    ? "Vi bygger 3D-modellen og viser den på haven, når den er klar."
+    ? currentStatus === "ready"
+      ? "3D-modellen er gemt på haven og kan åbnes i Havemåler."
+      : "Scandata er modtaget. Worker-rekonstruktionen opdaterer haven, når modellen er klar."
     : state === "camera"
       ? readinessHint
     : state === "ready"
@@ -470,7 +483,10 @@ export default function GardenMobileScan() {
       if (Array.isArray(sessionRow.anchors)) setAnchors(sessionRow.anchors as GardenScanAnchorObservation[]);
       setRouteProgress(readRouteProgress(sessionRow.capture_metadata));
       setSelectedAnchorId(nextTargets[0]?.id ?? null);
-      setState(["uploaded", "processing", "ready"].includes(sessionRow.status) ? "uploaded" : "ready");
+      if (sessionRow.status === "failed" || sessionRow.status === "cancelled") {
+        setCameraError(sessionRow.error_detail ?? scanActionHint(sessionRow.status));
+      }
+      setState(captureStateForStatus(sessionRow.status));
     }
     void load();
     return () => { alive = false; };
@@ -880,7 +896,9 @@ export default function GardenMobileScan() {
       setCameraLive(false);
       if (data?.session) setSession(data.session as GardenScanSession);
       setState("uploaded");
-      toast.success("Mobilscan uploadet");
+      toast.success("Scan modtaget", {
+        description: "Scandata er uploadet og klar til rekonstruktion.",
+      });
     } catch (error) {
       setState("camera");
       toast.error(error instanceof Error ? error.message : "Upload fejlede");
@@ -949,7 +967,7 @@ export default function GardenMobileScan() {
           {state !== "camera" && state !== "uploading" && (
             <div className="mobile-scan-standby">
               <Video size={42} />
-              <span>{state === "uploaded" ? "Upload færdig" : "Kamera klar"}</span>
+              <span>{state === "uploaded" ? uploadedStateTitle : state === "error" ? "Scan stoppet" : "Kamera klar"}</span>
             </div>
           )}
           {state === "camera" && !cameraLive && (
@@ -1007,7 +1025,12 @@ export default function GardenMobileScan() {
           )}
           {state === "uploaded" && (
             <Link className="btn btn-primary" to={`/havemaaler?garden=${gardenId}`}>
-              <CheckCircle2 size={16} /> Tilbage til 3D
+              <CheckCircle2 size={16} /> {currentStatus === "ready" ? "Tilbage til 3D" : "Tilbage til Havemåler"}
+            </Link>
+          )}
+          {state === "error" && (
+            <Link className="btn btn-primary" to={`/havemaaler?garden=${gardenId}`}>
+              <ArrowLeft size={16} /> Tilbage til Havemåler
             </Link>
           )}
         </div>

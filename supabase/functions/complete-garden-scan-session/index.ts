@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-garden-scan-worker-secret, x-worker-secret",
 };
 
 const ALLOWED_STATUS = new Set([
@@ -14,6 +14,8 @@ const ALLOWED_STATUS = new Set([
   "failed",
   "cancelled",
 ]);
+const USER_ALLOWED_STATUS = new Set(["capturing", "uploaded"]);
+const WORKER_ALLOWED_STATUS = new Set(["processing", "ready", "needs_anchor_correction", "failed"]);
 const TRANSITIONS: Record<string, string[]> = {
   created: ["capturing", "uploaded", "failed", "cancelled"],
   capturing: ["uploaded", "failed", "cancelled"],
@@ -78,6 +80,16 @@ function canTransition(from: string, to: string) {
 
 function objectOrEmpty(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeWarnings(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .map(String)
+      .map((warning) => warning.trim())
+      .filter(Boolean),
+  )].slice(0, 24);
 }
 
 function isLngLat(value: unknown) {
@@ -160,29 +172,49 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
-    const auth = req.headers.get("Authorization");
-    if (!auth) return json({ error: "Unauthorized" }, 401);
-
-    const sb = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: auth } } },
-    );
-    const { data: { user } } = await sb.auth.getUser();
-    if (!user) return json({ error: "Unauthorized" }, 401);
-
     const body = await req.json().catch(() => ({}));
     const sessionId = typeof body.session_id === "string" ? body.session_id : "";
     const status = typeof body.status === "string" && ALLOWED_STATUS.has(body.status) ? body.status : "";
     if (!sessionId) return json({ error: "session_id required" }, 400);
     if (!status) return json({ error: "valid status required" }, 400);
 
-    const { data: session, error: sessionError } = await sb
+    const workerSecret = Deno.env.get("GARDEN_SCAN_WORKER_SECRET");
+    const providedWorkerSecret = req.headers.get("x-garden-scan-worker-secret") ?? req.headers.get("x-worker-secret");
+    const workerAuthorized = Boolean(workerSecret && providedWorkerSecret && providedWorkerSecret === workerSecret);
+    if (workerAuthorized && !WORKER_ALLOWED_STATUS.has(status)) {
+      return json({ error: "status_not_allowed_for_worker", status }, 403);
+    }
+    if (!workerAuthorized && !USER_ALLOWED_STATUS.has(status)) {
+      return json({ error: "status_not_allowed_for_user", status }, 403);
+    }
+
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (workerAuthorized && !serviceKey) return json({ error: "SUPABASE_SERVICE_ROLE_KEY not set" }, 500);
+    const auth = req.headers.get("Authorization");
+    if (!workerAuthorized && !auth) return json({ error: "Unauthorized" }, 401);
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const sb = workerAuthorized
+      ? createClient(supabaseUrl, serviceKey!)
+      : createClient(
+        supabaseUrl,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: auth! } } },
+      );
+
+    let userId: string | null = null;
+    if (!workerAuthorized) {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) return json({ error: "Unauthorized" }, 401);
+      userId = user.id;
+    }
+
+    let sessionQuery = sb
       .from("garden_scan_sessions")
       .select("id,garden_id,user_id,status,manifest_path,status_history,processing_attempts,capture_metadata,anchors,upload_prefix")
-      .eq("id", sessionId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+      .eq("id", sessionId);
+    if (!workerAuthorized) sessionQuery = sessionQuery.eq("user_id", userId);
+    const { data: session, error: sessionError } = await sessionQuery.maybeSingle();
 
     if (sessionError) return json({ error: sessionError.message }, 500);
     if (!session) return json({ error: "session_not_found" }, 404);
@@ -195,7 +227,7 @@ Deno.serve(async (req) => {
       }, 409);
     }
 
-    const warnings = Array.isArray(body.warnings) ? body.warnings.map(String).slice(0, 24) : [];
+    const warnings = normalizeWarnings(body.warnings);
     const serverWarnings = [...warnings];
     const resultJson = body.result_json && typeof body.result_json === "object" ? body.result_json : null;
     const confidence = typeof body.confidence === "number" ? Math.max(0, Math.min(1, body.confidence)) : null;
@@ -205,7 +237,7 @@ Deno.serve(async (req) => {
     }
     if (status === "uploaded") {
       const manifestPath = typeof body.manifest_path === "string" ? body.manifest_path : session.manifest_path;
-      const expectedPrefix = typeof session.upload_prefix === "string" ? session.upload_prefix : `${user.id}/${sessionId}`;
+      const expectedPrefix = typeof session.upload_prefix === "string" ? session.upload_prefix : `${session.user_id}/${sessionId}`;
       if (typeof manifestPath !== "string" || !manifestPath.startsWith(`${expectedPrefix}/`)) {
         return json({ error: "manifest_path_outside_session_prefix", expected_prefix: expectedPrefix }, 400);
       }
@@ -255,14 +287,14 @@ Deno.serve(async (req) => {
     const statusHistory = Array.isArray(session.status_history) ? session.status_history : [];
     const updatePayload: Record<string, unknown> = {
       status,
-      warnings: [...new Set(serverWarnings)].slice(0, 24),
+      warnings: normalizeWarnings(serverWarnings),
       last_status_at: now,
       status_history: [
         ...statusHistory.slice(-24),
         {
           status,
           at: now,
-          actor: typeof body.actor === "string" ? body.actor : "client",
+          actor: typeof body.actor === "string" ? body.actor : workerAuthorized ? "worker" : "client",
           reason: typeof body.reason === "string" ? body.reason : null,
         },
       ],
@@ -286,26 +318,25 @@ Deno.serve(async (req) => {
     if (resultJson) updatePayload.result_json = resultJson;
     if (confidence !== null) updatePayload.confidence = confidence;
 
-    const { data: updated, error: updateError } = await sb
+    let updateQuery = sb
       .from("garden_scan_sessions")
       .update(updatePayload)
-      .eq("id", sessionId)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("id", sessionId);
+    if (!workerAuthorized) updateQuery = updateQuery.eq("user_id", userId);
+    const { data: updated, error: updateError } = await updateQuery.select().single();
 
     if (updateError || !updated) return json({ error: updateError?.message ?? "session_update_failed" }, 500);
 
     await sb.from("garden_scan_events").insert({
       session_id: sessionId,
       garden_id: session.garden_id,
-      user_id: user.id,
+      user_id: session.user_id,
       event_type: `status_${status}`,
       payload: {
         previous_status: session.status,
         status,
         confidence,
-        warnings: [...new Set(serverWarnings)].slice(0, 24),
+        warnings: normalizeWarnings(serverWarnings),
         error_code: typeof body.error_code === "string" ? body.error_code : null,
       },
     });
@@ -318,7 +349,7 @@ Deno.serve(async (req) => {
           depth_model_updated_at: new Date().toISOString(),
         })
         .eq("id", session.garden_id)
-        .eq("user_id", user.id);
+        .eq("user_id", session.user_id);
 
       if (gardenError) return json({ error: gardenError.message, session: updated }, 500);
     }
