@@ -41,6 +41,21 @@ export default function GardenScanPanel({
   const resolvedScanButtonLabel = scanButtonLabel ?? (canStartAnother ? "Scan mobil" : "Fortsæt scan");
   const blockingIssueCount = inspection?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const warningIssueCount = inspection?.issues.filter((issue) => issue.severity === "warning").length ?? 0;
+  const twinStatus = depthModel?.twin.status === "scan_aligned"
+    ? "Full twin klar"
+    : depthModel?.twin.status === "needs_review"
+      ? "Twin kræver review"
+      : depthModel?.twin.status === "evidence_ready"
+        ? "Evidens klar"
+        : "Twin draft";
+  const routeMetric = evidence
+    ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS}`
+    : depthModel?.twin.evidence.routeStepCount || depthModel?.captureReadiness.recommendedSeconds.join("-") || "45-90";
+  const keyframeMetric = evidence
+    ? evidence.keyframeCount
+    : depthModel?.twin.evidence.keyframeCount || confirmedCount;
+  const hasRouteEvidence = Boolean(evidence || depthModel?.twin.evidence.routeStepCount);
+  const hasKeyframeEvidence = Boolean(evidence || depthModel?.twin.evidence.keyframeCount);
 
   return (
     <section className="garden-scan-panel">
@@ -54,15 +69,16 @@ export default function GardenScanPanel({
 
       <div className="garden-scan-panel__metrics">
         <div><CheckCircle2 size={14} /><strong>{geometryCount}</strong><span>{isFlatPreview ? "plæneflader" : "objekter"}</span></div>
-        <div><Activity size={14} /><strong>{evidence ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS}` : depthModel?.captureReadiness.recommendedSeconds.join("-") ?? "45-90"}</strong><span>{evidence ? "rute" : "sek scan"}</span></div>
-        <div><ShieldCheck size={14} /><strong>{evidence ? evidence.keyframeCount : confirmedCount}</strong><span>{evidence ? "keyframes" : isFlatPreview ? "scannede" : "bekræftet"}</span></div>
+        <div><Activity size={14} /><strong>{routeMetric}</strong><span>{hasRouteEvidence ? "rute" : "sek scan"}</span></div>
+        <div><ShieldCheck size={14} /><strong>{keyframeMetric}</strong><span>{hasKeyframeEvidence ? "keyframes" : isFlatPreview ? "scannede" : "bekræftet"}</span></div>
       </div>
 
       {depthModel && (
         <div className="garden-scan-readiness">
-          <span>{depthPipelineStageLabel(stage)}</span>
+          <span>{depthPipelineStageLabel(stage)} · {twinStatus}</span>
           <p>
             {depthModel.quality.reasons.join(" ")}
+            {" "}Garden twin er {depthModel.twin.role.visual && depthModel.twin.role.operational ? "visuel og operationel" : "ufuldstaendig"} med {depthModel.twin.confidencePolicy}.
             {blockingIssueCount > 0 ? ` ${blockingIssueCount} blokerende modeltjek.` : ""}
             {warningIssueCount > 0 ? ` ${warningIssueCount} advarsler.` : ""}
           </p>
@@ -70,6 +86,11 @@ export default function GardenScanPanel({
             {depthModel.captureReadiness.anchorSuggestions.map((anchor) => (
               <i key={anchor.id}>{anchor.label}</i>
             ))}
+            {depthModel.twin.evidence.mobileScan && <i>{depthModel.twin.evidence.alignableAnchorCount} scan-ankre</i>}
+            {depthModel.twin.evidence.routePoseCount ? <i>{depthModel.twin.evidence.routePoseCount} route-poser</i> : null}
+            {typeof depthModel.twin.evidence.motionScore === "number" && depthModel.twin.evidence.motionScore > 0 ? <i>{Math.round(depthModel.twin.evidence.motionScore * 100)}% motion</i> : null}
+            {depthModel.terrain.unknownRegions.length > 0 && <i>{depthModel.terrain.unknownRegions.length} ukendt</i>}
+            {!depthModel.twin.model.commercialUseApproved && <i>licens review</i>}
           </div>
         </div>
       )}
@@ -106,7 +127,7 @@ export default function GardenScanPanel({
           </div>
           <i><b style={{ width: `${scanProgress(latest.status)}%` }} /></i>
           <small>
-            {evidence ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS} rute · ${Math.min(evidence.keyframeCount, MIN_SCAN_KEYFRAMES)}/${MIN_SCAN_KEYFRAMES} billeder · ${evidence.alignableAnchorCount}/${RECOMMENDED_ALIGNED_ANCHORS} ankre` : "Ingen scandata endnu"}
+            {evidence ? `${Math.min(evidence.completedRouteSteps, MIN_ROUTE_STEPS)}/${MIN_ROUTE_STEPS} rute · ${Math.min(evidence.keyframeCount, MIN_SCAN_KEYFRAMES)}/${MIN_SCAN_KEYFRAMES} billeder · ${evidence.routePoseCount} pose · ${evidence.alignableAnchorCount}/${RECOMMENDED_ALIGNED_ANCHORS} ankre` : "Ingen scandata endnu"}
             {evidence?.processingAttempts ? ` · ${evidence.processingAttempts} forsøg` : ""}
             {latest.error_detail ? ` · ${latest.error_detail}` : ""}
           </small>

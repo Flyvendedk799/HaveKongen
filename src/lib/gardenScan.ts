@@ -1,4 +1,6 @@
 import type { Json, Tables } from "@/integrations/supabase/types";
+import type { DeviceMotionSummary } from "@/lib/scanMotion";
+import type { DeviceFrameQuality, DeviceScanQualitySummary } from "@/lib/scanQuality";
 
 export type GardenScanSession = Tables<"garden_scan_sessions">;
 
@@ -40,6 +42,27 @@ export type GardenScanRouteObservation = {
   completedAt: string;
   captureSeconds?: number | null;
   evidenceFrameId?: string | null;
+  mapLngLat?: [number, number] | null;
+  local?: { x: number; z: number } | null;
+  poseConfidence?: number | null;
+  frameCountAtStep?: number | null;
+  usableFrameCountAtStep?: number | null;
+  motionSampleCount?: number | null;
+  deviceQualityScore?: number | null;
+  motionScore?: number | null;
+};
+
+export type GardenScanRoutePoseHint = {
+  id: string;
+  label?: string | null;
+  source: "guided_route";
+  mapLngLat: [number, number];
+  local: { x: number; z: number };
+  confidence: number;
+  evidenceFrameId?: string | null;
+  completedAt?: string | null;
+  motionScore?: number | null;
+  deviceQualityScore?: number | null;
 };
 
 export type GardenScanManifest = {
@@ -72,6 +95,17 @@ export type GardenScanManifest = {
     completed_route_steps?: number | null;
     route_progress?: number | null;
     coverage_score?: number | null;
+    route_pose_count?: number | null;
+    route_pose_spread_m?: number | null;
+    motion_score?: number | null;
+    parallax_score?: number | null;
+    motion_summary?: DeviceMotionSummary | null;
+    device_quality_score?: number | null;
+    usable_keyframe_count?: number | null;
+    blurry_frame_count?: number | null;
+    low_light_frame_count?: number | null;
+    overexposed_frame_count?: number | null;
+    quality_summary?: DeviceScanQualitySummary | null;
     low_light?: boolean | null;
   };
   anchors: GardenScanAnchorObservation[];
@@ -80,7 +114,10 @@ export type GardenScanManifest = {
     camera_target: "garden_center";
     required_step_count: number;
     steps: GardenScanRouteObservation[];
+    pose_hints?: GardenScanRoutePoseHint[];
   };
+  deviceFrameQuality?: Array<DeviceFrameQuality & { frameId: string }>;
+  deviceMotion?: DeviceMotionSummary | null;
   files: {
     manifest?: string | null;
     tracking: string;
@@ -102,7 +139,15 @@ export type ScanEvidenceSummary = {
   completedRouteSteps: number;
   routeReady: boolean;
   keyframeCount: number;
+  usableFrameCount: number;
+  deviceQualityScore: number;
   keyframesReady: boolean;
+  deviceQualityReady: boolean;
+  routePoseCount: number;
+  routePoseSpreadM: number;
+  motionScore: number;
+  parallaxScore: number;
+  motionReady: boolean;
   alignableAnchorCount: number;
   anchorSpreadM: number;
   manualAnchorsStrong: boolean;
@@ -261,6 +306,60 @@ function countMetadataRouteSteps(value: unknown) {
   return routeSteps.filter((step) => recordOrNull(step) && typeof recordOrNull(step)?.id === "string").length;
 }
 
+function isLocalPoint(value: unknown): value is { x: number; z: number } {
+  const point = recordOrNull(value);
+  return typeof point?.x === "number"
+    && Number.isFinite(point.x)
+    && typeof point.z === "number"
+    && Number.isFinite(point.z);
+}
+
+function routePoseHintsFromValue(value: unknown): GardenScanRoutePoseHint[] {
+  const record = recordOrNull(value);
+  const route = recordOrNull(record?.route);
+  const directHints = Array.isArray(route?.pose_hints) ? route.pose_hints : [];
+  const routeSteps = Array.isArray(record?.route_steps)
+    ? record.route_steps
+    : Array.isArray(route?.steps)
+      ? route.steps
+      : [];
+  const rows = directHints.length ? directHints : routeSteps;
+  return rows
+    .filter(recordOrNull)
+    .map((row, index): GardenScanRoutePoseHint | null => {
+      const recordRow = row as Record<string, unknown>;
+      if (!isLngLat(recordRow.mapLngLat) || !isLocalPoint(recordRow.local)) return null;
+      return {
+        id: typeof recordRow.id === "string" ? recordRow.id : `route-pose-${index + 1}`,
+        label: typeof recordRow.label === "string" ? recordRow.label : null,
+        source: "guided_route",
+        mapLngLat: recordRow.mapLngLat,
+        local: recordRow.local,
+        confidence: finiteNumber(recordRow.confidence) ?? finiteNumber(recordRow.poseConfidence) ?? 0.46,
+        evidenceFrameId: typeof recordRow.evidenceFrameId === "string" ? recordRow.evidenceFrameId : null,
+        completedAt: typeof recordRow.completedAt === "string" ? recordRow.completedAt : null,
+        motionScore: finiteNumber(recordRow.motionScore),
+        deviceQualityScore: finiteNumber(recordRow.deviceQualityScore),
+      };
+    })
+    .filter((row): row is GardenScanRoutePoseHint => Boolean(row));
+}
+
+export function countRoutePoseHints(value: unknown) {
+  return routePoseHintsFromValue(value).length;
+}
+
+export function routePoseSpreadMeters(value: unknown) {
+  const poses = routePoseHintsFromValue(value);
+  let best = 0;
+  for (let i = 0; i < poses.length; i += 1) {
+    for (let j = i + 1; j < poses.length; j += 1) {
+      best = Math.max(best, distanceMeters(poses[i].mapLngLat, poses[j].mapLngLat));
+    }
+  }
+  return Number(best.toFixed(2));
+}
+
 export function scanEvidenceSummary(session: GardenScanSession): ScanEvidenceSummary {
   const metadata = recordOrNull(session.capture_metadata) ?? {};
   const alignableAnchorCount = countAlignableAnchors(session.anchors);
@@ -275,11 +374,31 @@ export function scanEvidenceSummary(session: GardenScanSession): ScanEvidenceSum
   const keyframeCount = numberFromRecord(metadata, "keyframe_count")
     ?? numberFromRecord(metadata, "frame_count")
     ?? 0;
+  const usableFrameCount = numberFromRecord(metadata, "usable_keyframe_count")
+    ?? numberFromRecord(recordOrNull(metadata.quality_summary), "usableFrameCount")
+    ?? keyframeCount;
+  const deviceQualityScore = numberFromRecord(metadata, "device_quality_score")
+    ?? numberFromRecord(recordOrNull(metadata.quality_summary), "qualityScore")
+    ?? 0;
+  const routePoseCount = numberFromRecord(metadata, "route_pose_count")
+    ?? countRoutePoseHints(metadata);
+  const routePoseSpreadM = numberFromRecord(metadata, "route_pose_spread_m")
+    ?? routePoseSpreadMeters(metadata);
+  const motionScore = numberFromRecord(metadata, "motion_score")
+    ?? numberFromRecord(recordOrNull(metadata.motion_summary), "motionScore")
+    ?? 0;
+  const parallaxScore = numberFromRecord(metadata, "parallax_score")
+    ?? numberFromRecord(recordOrNull(metadata.motion_summary), "parallaxScore")
+    ?? 0;
   const routeReady = completedRouteSteps >= MIN_ROUTE_STEPS;
   const keyframesReady = keyframeCount >= MIN_SCAN_KEYFRAMES;
+  const deviceQualityReady = keyframeCount < MIN_SCAN_KEYFRAMES || usableFrameCount >= Math.min(MIN_SCAN_KEYFRAMES, keyframeCount);
   const manualAnchorsStrong = alignableAnchorCount >= MIN_ALIGNED_ANCHORS && anchorSpreadM >= MIN_ANCHOR_SPREAD_M;
   const manualAnchorsRecommended = alignableAnchorCount >= RECOMMENDED_ALIGNED_ANCHORS && anchorSpreadM >= RECOMMENDED_ANCHOR_SPREAD_M;
-  const readyToUpload = Boolean(session.upload_prefix && routeReady && keyframesReady);
+  const routePoseReady = routePoseCount >= MIN_ROUTE_STEPS && routePoseSpreadM >= MIN_ANCHOR_SPREAD_M;
+  const motionReady = motionScore === 0 || motionScore >= 0.3 || parallaxScore >= 0.25;
+  const noGpuAlignmentReady = manualAnchorsStrong || routePoseReady;
+  const readyToUpload = Boolean(session.upload_prefix && routeReady && keyframesReady && deviceQualityReady && noGpuAlignmentReady && (manualAnchorsStrong || motionReady));
   const warningCodes = normalizeScanWarnings(session.warnings);
 
   let readinessLabel = "Scanpakke mangler";
@@ -290,9 +409,18 @@ export function scanEvidenceSummary(session: GardenScanSession): ScanEvidenceSum
   } else if (!keyframesReady) {
     readinessLabel = "Flere vinkler";
     readinessHint = `Saml ${Math.max(0, MIN_SCAN_KEYFRAMES - keyframeCount)} keyframe${MIN_SCAN_KEYFRAMES - keyframeCount === 1 ? "" : "s"} mere før upload.`;
+  } else if (!deviceQualityReady) {
+    readinessLabel = "Hold telefonen roligt";
+    readinessHint = "Flere billeder er for mørke, lyse eller uskarpe. Gå lidt langsommere og hold kameraet mod havens midte.";
+  } else if (!noGpuAlignmentReady) {
+    readinessLabel = "Mangler pose-evidens";
+    readinessHint = "Gennemfør ruten med kortpositioner eller tilføj 2 manuelle ankre, så worker kan placere scannet i haven.";
+  } else if (!manualAnchorsStrong && !motionReady) {
+    readinessLabel = "Mere bevægelse";
+    readinessHint = "Route-poser er klar, men telefonens motion/parallax er svag. Gå langsommere rundt med haven i billedet.";
   } else if (!manualAnchorsStrong) {
     readinessLabel = "Klar uden manuelle ankre";
-    readinessHint = "Rute og billeder er nok til upload. Tilføj 2 manuelle ankre for stærkere alignment.";
+    readinessHint = "Rute, pose-hints og billeder er nok til upload. Tilføj 2 manuelle ankre for stærkere alignment.";
   } else if (!manualAnchorsRecommended) {
     readinessLabel = "Klar med ankre";
     readinessHint = "Upload er klar. Flere eller mere spredte ankre kan styrke 3D-alignment.";
@@ -307,7 +435,15 @@ export function scanEvidenceSummary(session: GardenScanSession): ScanEvidenceSum
     completedRouteSteps,
     routeReady,
     keyframeCount,
+    usableFrameCount,
+    deviceQualityScore,
     keyframesReady,
+    deviceQualityReady,
+    routePoseCount,
+    routePoseSpreadM,
+    motionScore,
+    parallaxScore,
+    motionReady,
     alignableAnchorCount,
     anchorSpreadM,
     manualAnchorsStrong,
@@ -415,6 +551,18 @@ export function inspectScanManifest(value: unknown): { manifest: GardenScanManif
     if (row.capture.low_light) {
       issues.push({ severity: "warning", code: "low_light", message: "Lavt lys reducerer objekt- og dybdekvalitet." });
     }
+    if (typeof row.capture.usable_keyframe_count === "number" && row.capture.usable_keyframe_count < MIN_SCAN_KEYFRAMES) {
+      issues.push({ severity: "warning", code: "few_usable_keyframes", message: "Flere keyframes er mørke, overbelyste eller uskarpe." });
+    }
+    if (typeof row.capture.device_quality_score === "number" && row.capture.device_quality_score < 0.45) {
+      issues.push({ severity: "warning", code: "weak_device_quality", message: "Telefonens billedkvalitet er svag for rekonstruktion." });
+    }
+    if (typeof row.capture.motion_score === "number" && row.capture.motion_score > 0 && row.capture.motion_score < 0.3) {
+      issues.push({ severity: "warning", code: "weak_phone_motion", message: "Telefonens motion/parallax er svag for route-baseret alignment." });
+    }
+    if (typeof row.capture.parallax_score === "number" && row.capture.parallax_score > 0 && row.capture.parallax_score < 0.25) {
+      issues.push({ severity: "warning", code: "weak_motion_parallax", message: "Gå lidt mere rundt om haven for stærkere parallax." });
+    }
   }
   const capture = row.capture;
   const completedRouteSteps = typeof capture?.completed_route_steps === "number"
@@ -422,16 +570,25 @@ export function inspectScanManifest(value: unknown): { manifest: GardenScanManif
     : routeObservationCount(row);
   const routeGuided = capture?.route_guided === true || row.route?.mode === "guided_center_route";
   const routeReady = routeGuided && completedRouteSteps >= MIN_ROUTE_STEPS;
+  const routePoseCount = typeof capture?.route_pose_count === "number" ? capture.route_pose_count : countRoutePoseHints(row);
+  const routePoseSpreadM = typeof capture?.route_pose_spread_m === "number" ? capture.route_pose_spread_m : routePoseSpreadMeters(row);
+  const routePoseReady = routePoseCount >= MIN_ROUTE_STEPS && routePoseSpreadM >= MIN_ANCHOR_SPREAD_M;
   if (!routeGuided) {
     issues.push({ severity: "warning", code: "route_guidance_missing", message: "Guidet rute mangler i manifestet." });
   } else if (completedRouteSteps < MIN_ROUTE_STEPS) {
     issues.push({ severity: "error", code: "route_incomplete", message: `Gennemfør mindst ${MIN_ROUTE_STEPS} rutepunkter med kameraet peget mod havens midte.` });
+  } else if (routePoseCount < MIN_ROUTE_STEPS) {
+    issues.push({ severity: "warning", code: "route_pose_hints_missing", message: "Ruten mangler kortpositioner til no-GPU alignment." });
+  } else if (routePoseSpreadM < MIN_ANCHOR_SPREAD_M) {
+    issues.push({ severity: "warning", code: "weak_route_pose_spread", message: "Route-poserne er for tæt på hinanden til stærk alignment." });
   }
 
   const alignableAnchorCount = countAlignableAnchors(row.anchors);
   if (alignableAnchorCount < MIN_ALIGNED_ANCHORS) {
-    if (routeReady) {
-      issues.push({ severity: "warning", code: "manual_anchors_missing", message: "Manuelle ankre mangler. Scanningen kan stadig uploades, men alignment bliver lavere sikkerhed." });
+    if (routeReady && routePoseReady) {
+      issues.push({ severity: "warning", code: "manual_anchors_missing", message: "Manuelle ankre mangler. Route-poser kan bruges, men alignment bliver lavere sikkerhed." });
+    } else if (routeReady) {
+      issues.push({ severity: "warning", code: "manual_anchors_or_route_pose_missing", message: "Manuelle ankre eller stærke route-poser anbefales for no-GPU alignment." });
     } else {
       issues.push({ severity: "error", code: "route_or_anchors_required", message: "Gennemfør ruten eller tilføj mindst 2 manuelle ankre." });
     }

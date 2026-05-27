@@ -48,6 +48,43 @@ export type GardenDepthValidationIssue = {
   message: string;
 };
 
+export type GardenTwinContract = {
+  scope: "full";
+  role: {
+    visual: boolean;
+    operational: boolean;
+  };
+  status: "draft" | "evidence_ready" | "scan_aligned" | "needs_review";
+  confidencePolicy: "truthful-confidence";
+  updatedBy: "havemaaler_2d" | "mobile_web_scan" | "ai_reconstruction_worker" | "manual_review";
+  model: {
+    name: string;
+    version: string;
+    provider: "havekongen" | "colmap" | "vggt" | "vggt-omega" | "sam2" | "depth-anything-v2" | "hybrid";
+    license: "commercial-approved" | "open-source" | "non-commercial-evaluation" | "not-configured";
+    commercialUseApproved: boolean;
+  };
+  evidence: {
+    ortofoto: boolean;
+    cadastralBoundary: boolean;
+    manualGeometry: boolean;
+    mobileScan: boolean;
+    keyframeCount: number;
+    usableKeyframeCount?: number | null;
+    routeStepCount: number;
+    alignableAnchorCount: number;
+    anchorSpreadM?: number | null;
+    routePoseCount?: number | null;
+    routePoseSpreadM?: number | null;
+    coverageScore?: number | null;
+    deviceQualityScore?: number | null;
+    motionScore?: number | null;
+    parallaxScore?: number | null;
+    residualM?: number | null;
+    warnings: string[];
+  };
+};
+
 export type GardenDepthModel = {
   version: 1;
   generatedAt: string;
@@ -58,6 +95,8 @@ export type GardenDepthModel = {
   alignment: {
     mode: "satellite-only" | "scan-anchored" | "manual";
     anchorCount: number;
+    routePoseCount?: number | null;
+    routePoseSpreadM?: number | null;
     residualM?: number | null;
     confidence: number;
     notes?: string;
@@ -68,6 +107,7 @@ export type GardenDepthModel = {
     reasons: string[];
     nextBestAction: "draw_lawn" | "add_anchors" | "mobile_scan" | "review_objects" | "ready";
   };
+  twin: GardenTwinContract;
   captureReadiness: {
     minimumAnchors: number;
     recommendedAnchors: number;
@@ -180,6 +220,21 @@ export function inspectGardenDepthModel(value: unknown): { model: GardenDepthMod
   if (model.captureReadiness.minimumAnchors < 2) {
     issues.push({ severity: "warning", code: "weak_minimum_anchor_rule", message: "Pipeline bør kræve mindst 2 ankre." });
   }
+  if (model.twin.scope !== "full" || !model.twin.role.visual || !model.twin.role.operational) {
+    issues.push({ severity: "error", code: "invalid_twin_scope", message: "Garden twin skal være både visuel og operationel." });
+  }
+  if (model.twin.confidencePolicy !== "truthful-confidence") {
+    issues.push({ severity: "error", code: "invalid_confidence_policy", message: "Garden twin skal bruge truthful-confidence policy." });
+  }
+  if (!model.twin.model.commercialUseApproved) {
+    issues.push({ severity: "warning", code: "model_license_not_production_approved", message: "Rekonstruktionsmodellen mangler produktionsgodkendt licensmetadata." });
+  }
+  if (model.twin.status === "scan_aligned" && model.alignment.mode !== "scan-anchored") {
+    issues.push({ severity: "error", code: "scan_twin_requires_scan_alignment", message: "Scan-aligned twin kræver scan-anchored alignment." });
+  }
+  if (model.twin.evidence.mobileScan && model.twin.evidence.keyframeCount < 8) {
+    issues.push({ severity: "warning", code: "mobile_scan_with_few_keyframes", message: "Mobilscan-evidens har færre end 8 keyframes." });
+  }
   if (model.objects.some((object) => object.footprint.length < 3)) {
     issues.push({ severity: "error", code: "object_with_invalid_footprint", message: "Et objekt mangler gyldigt footprint." });
   }
@@ -195,8 +250,8 @@ export function inspectGardenDepthModel(value: unknown): { model: GardenDepthMod
   if (model.alignment.mode !== "scan-anchored" && model.quality.grade === "strong") {
     issues.push({ severity: "warning", code: "strong_quality_requires_scan", message: "Strong kvalitet bør kræve scan-anchored alignment." });
   }
-  if (model.alignment.mode === "scan-anchored" && model.alignment.anchorCount < 2) {
-    issues.push({ severity: "error", code: "scan_alignment_requires_anchors", message: "Scan-alignment kræver mindst 2 ankre." });
+  if (model.alignment.mode === "scan-anchored" && model.alignment.anchorCount < 2 && (model.alignment.routePoseCount ?? 0) < 4) {
+    issues.push({ severity: "error", code: "scan_alignment_requires_anchors_or_route_poses", message: "Scan-alignment kræver mindst 2 ankre eller 4 route-poser." });
   }
 
   return {
@@ -305,6 +360,22 @@ export function generateGardenDepthModel(input: GenerateDepthModelInput): Garden
       notes: "Flat lawn preview from Havemåler geometry. Add a mobile web scan before trusting depth, height, or obstacle alignment.",
     },
     quality,
+    twin: baseTwinContract({
+      status: "draft",
+      updatedBy: "havemaaler_2d",
+      modelName: "havemaaler-satellite-preview",
+      modelVersion: "garden-twin-v1",
+      provider: "havekongen",
+      license: "commercial-approved",
+      commercialUseApproved: true,
+      evidence: {
+        ortofoto: true,
+        cadastralBoundary: Boolean(input.matrikel?.length),
+        manualGeometry: true,
+        mobileScan: false,
+        warnings,
+      },
+    }),
     captureReadiness: {
       minimumAnchors: 2,
       recommendedAnchors: 4,
@@ -343,7 +414,7 @@ function upgradeLegacyDepthModel(value: unknown): GardenDepthModel | null {
   if (row.version !== 1 || row.units !== "meters" || !Array.isArray(row.center) || !row.terrain || !Array.isArray(row.objects)) {
     return null;
   }
-  if (row.quality && row.captureReadiness && row.privacy) return null;
+  if (row.quality && row.captureReadiness && row.privacy && row.twin) return null;
   const center = row.center as LngLat;
   const terrain = row.terrain as GardenDepthModel["terrain"];
   const objects = row.objects.map((object) => ({
@@ -369,6 +440,23 @@ function upgradeLegacyDepthModel(value: unknown): GardenDepthModel | null {
       anchorCount: row.alignment?.anchorCount ?? 0,
       hasMatrikel: Boolean(terrain.boundary?.length),
       hasExclusions: objects.some((object) => object.source === "manual"),
+    }),
+    twin: row.twin ?? baseTwinContract({
+      status: row.alignment?.mode === "scan-anchored" ? "needs_review" : "draft",
+      updatedBy: row.alignment?.mode === "scan-anchored" ? "ai_reconstruction_worker" : "havemaaler_2d",
+      modelName: row.alignment?.mode === "scan-anchored" ? "legacy-scan-reconstruction" : "legacy-satellite-preview",
+      modelVersion: "garden-twin-v1",
+      provider: "havekongen",
+      license: "commercial-approved",
+      commercialUseApproved: true,
+      evidence: {
+        ortofoto: true,
+        cadastralBoundary: Boolean(terrain.boundary?.length),
+        manualGeometry: Boolean(terrain.lawnRings?.length),
+        mobileScan: row.alignment?.mode === "scan-anchored",
+        residualM: row.alignment?.residualM ?? null,
+        warnings: row.warnings ?? [],
+      },
     }),
     captureReadiness: row.captureReadiness ?? {
       minimumAnchors: 2,
@@ -460,6 +548,54 @@ function qualityForModel(input: { objectCount: number; anchorCount: number; hasM
     grade,
     reasons,
     nextBestAction: input.anchorCount >= 2 ? "review_objects" : "mobile_scan",
+  };
+}
+
+function baseTwinContract(input: {
+  status: GardenTwinContract["status"];
+  updatedBy: GardenTwinContract["updatedBy"];
+  modelName: string;
+  modelVersion: string;
+  provider: GardenTwinContract["model"]["provider"];
+  license: GardenTwinContract["model"]["license"];
+  commercialUseApproved: boolean;
+  evidence: Partial<GardenTwinContract["evidence"]>;
+}): GardenTwinContract {
+  return {
+    scope: "full",
+    role: {
+      visual: true,
+      operational: true,
+    },
+    status: input.status,
+    confidencePolicy: "truthful-confidence",
+    updatedBy: input.updatedBy,
+    model: {
+      name: input.modelName,
+      version: input.modelVersion,
+      provider: input.provider,
+      license: input.license,
+      commercialUseApproved: input.commercialUseApproved,
+    },
+    evidence: {
+      ortofoto: input.evidence.ortofoto ?? false,
+      cadastralBoundary: input.evidence.cadastralBoundary ?? false,
+      manualGeometry: input.evidence.manualGeometry ?? false,
+      mobileScan: input.evidence.mobileScan ?? false,
+      keyframeCount: input.evidence.keyframeCount ?? 0,
+      usableKeyframeCount: input.evidence.usableKeyframeCount ?? null,
+      routeStepCount: input.evidence.routeStepCount ?? 0,
+      alignableAnchorCount: input.evidence.alignableAnchorCount ?? 0,
+      anchorSpreadM: input.evidence.anchorSpreadM ?? null,
+      routePoseCount: input.evidence.routePoseCount ?? null,
+      routePoseSpreadM: input.evidence.routePoseSpreadM ?? null,
+      coverageScore: input.evidence.coverageScore ?? null,
+      deviceQualityScore: input.evidence.deviceQualityScore ?? null,
+      motionScore: input.evidence.motionScore ?? null,
+      parallaxScore: input.evidence.parallaxScore ?? null,
+      residualM: input.evidence.residualM ?? null,
+      warnings: input.evidence.warnings ?? [],
+    },
   };
 }
 
