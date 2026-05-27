@@ -56,6 +56,11 @@ describe("gardenDepth", () => {
     expect(model?.terrain.areaM2).toBe(500);
     expect(model?.objects.some((object) => object.type === "patio")).toBe(true);
     expect(model?.quality.nextBestAction).toBe("mobile_scan");
+    expect(model?.twin.scope).toBe("full");
+    expect(model?.twin.role.visual).toBe(true);
+    expect(model?.twin.role.operational).toBe(true);
+    expect(model?.twin.confidencePolicy).toBe("truthful-confidence");
+    expect(model?.twin.model.commercialUseApproved).toBe(true);
     expect(model?.captureReadiness.anchorSuggestions.length).toBeGreaterThan(0);
     expect(model?.warnings).toContain("satellite_only_depth");
   });
@@ -84,6 +89,73 @@ describe("gardenDepth", () => {
     expect(inspectGardenDepthModel(model).readyForSave).toBe(true);
     expect(depthPipelineStage(model)).toBe("satellite_preview");
     expect(depthPipelineStageLabel("satellite_preview")).toBe("Flad kort-preview");
+  });
+
+  it("upgrades legacy depth models into the full garden twin contract", () => {
+    const model = generateGardenDepthModel({ lawnRings: [lawn] })!;
+    const legacy = {
+      version: model.version,
+      generatedAt: model.generatedAt,
+      center: model.center,
+      units: model.units,
+      alignment: model.alignment,
+      quality: model.quality,
+      captureReadiness: model.captureReadiness,
+      terrain: model.terrain,
+      objects: model.objects,
+      warnings: model.warnings,
+      privacy: model.privacy,
+    };
+
+    const upgraded = coerceGardenDepthModel(legacy);
+
+    expect(upgraded?.twin.scope).toBe("full");
+    expect(upgraded?.twin.role.operational).toBe(true);
+    expect(validateGardenDepthModel(upgraded)).toEqual([]);
+  });
+
+  it("rejects garden twins that do not use truthful confidence", () => {
+    const model = generateGardenDepthModel({ lawnRings: [lawn] })!;
+    const invalid = {
+      ...model,
+      twin: {
+        ...model.twin,
+        confidencePolicy: "best-guess",
+      },
+    };
+
+    expect(validateGardenDepthModel(invalid)).toContain("invalid_confidence_policy");
+  });
+
+  it("allows scan-aligned twins to use route poses when manual anchors are absent", () => {
+    const model = generateGardenDepthModel({ lawnRings: [lawn] })!;
+    const routePoseModel = {
+      ...model,
+      alignment: {
+        ...model.alignment,
+        mode: "scan-anchored" as const,
+        anchorCount: 0,
+        routePoseCount: 4,
+        routePoseSpreadM: 12,
+        confidence: 0.62,
+      },
+      twin: {
+        ...model.twin,
+        status: "needs_review" as const,
+        evidence: {
+          ...model.twin.evidence,
+          mobileScan: true,
+          keyframeCount: 12,
+          routeStepCount: 4,
+          routePoseCount: 4,
+          routePoseSpreadM: 12,
+          warnings: ["route_pose_alignment_estimate"],
+        },
+      },
+    };
+
+    expect(validateGardenDepthModel(routePoseModel)).not.toContain("scan_alignment_requires_anchors_or_route_poses");
+    expect(inspectGardenDepthModel(routePoseModel).readyForSave).toBe(true);
   });
 
   it("builds the mobile web scan URL", () => {

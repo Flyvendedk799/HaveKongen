@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Camera, CheckCircle2, CircleDot, Footprints, MapPinned, UploadCloud, Video } from "lucide-react";
+import { Activity, ArrowLeft, Camera, CheckCircle2, CircleDot, Footprints, MapPinned, UploadCloud, Video } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
-import type { LngLat, LocalPoint } from "@/lib/gardenDepth";
+import { localToLngLat, type LngLat, type LocalPoint } from "@/lib/gardenDepth";
 import {
   buildUploadTargets,
   anchorSpreadMeters,
@@ -20,6 +20,7 @@ import {
   RECOMMENDED_ANCHOR_SPREAD_M,
   RECOMMENDED_ROUTE_STEPS,
   RECOMMENDED_SCAN_KEYFRAMES,
+  routePoseSpreadMeters,
   scanActionHint,
   scanManifestToJson,
   scanProgress,
@@ -29,6 +30,13 @@ import {
   type GardenScanRouteObservation,
   type GardenScanSession,
 } from "@/lib/gardenScan";
+import { scanMotionLabel, summarizeDeviceMotion, type DeviceMotionSample } from "@/lib/scanMotion";
+import {
+  analyzeDeviceFrameQuality,
+  scanQualityLabel,
+  summarizeDeviceScanQuality,
+  type DeviceFrameQuality,
+} from "@/lib/scanQuality";
 
 type FrameCapture = {
   id: string;
@@ -39,14 +47,10 @@ type FrameCapture = {
   width: number;
   height: number;
   source: "auto" | "manual" | "anchor" | "route";
+  quality: DeviceFrameQuality;
 };
 
-type MotionSample = {
-  t: number;
-  acceleration?: { x: number | null; y: number | null; z: number | null };
-  rotationRate?: { alpha: number | null; beta: number | null; gamma: number | null };
-  interval?: number | null;
-};
+type MotionSample = DeviceMotionSample;
 
 type CaptureState = "loading" | "ready" | "camera" | "uploading" | "uploaded" | "error";
 type AnchorKind = NonNullable<GardenScanAnchorObservation["kind"]>;
@@ -60,6 +64,7 @@ type AnchorTarget = {
 };
 
 type AnchorMapFrame = {
+  center?: LngLat | null;
   boundary: LngLat[];
   localBoundary: LocalPoint[];
   localLawnRings: LocalPoint[][];
@@ -115,6 +120,8 @@ const ROUTE_STEPS: RouteStep[] = [
     instruction: "Gå tilbage langs den anden side. Hold træer, hegn og skure i kanten af billedet.",
   },
 ];
+
+const MIN_USABLE_SCAN_KEYFRAMES = 5;
 
 type MotionPermissionCtor = typeof DeviceMotionEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
@@ -203,6 +210,7 @@ function readMapFrame(metadata: unknown): AnchorMapFrame | null {
   const localLawnRings = readLocalRings(rawFrame.local_lawn_rings);
   if (localBoundary.length < 3 && !localLawnRings.length) return null;
   return {
+    center: readLngLat(rawFrame.center),
     boundary,
     localBoundary,
     localLawnRings,
@@ -396,12 +404,23 @@ export default function GardenMobileScan() {
   const uploadPrefix = session?.upload_prefix ?? (user ? `${user.id}/${sessionId}` : "");
   const alignedAnchorCount = countAlignableAnchors(anchors);
   const anchorSpreadM = anchorSpreadMeters(anchors);
+  const deviceQuality = useMemo(() => summarizeDeviceScanQuality(frames.map((frame) => frame.quality)), [frames]);
+  const motionSummary = summarizeDeviceMotion(motionSamplesRef.current);
+  const deviceQualityReady = frames.length < MIN_SCAN_KEYFRAMES
+    || (deviceQuality.usableFrameCount >= MIN_USABLE_SCAN_KEYFRAMES && deviceQuality.qualityScore >= 0.35);
+  const deviceQualityLabel = scanQualityLabel(deviceQuality);
+  const motionLabel = scanMotionLabel(motionSummary);
+  const routePoseCount = routeProgress.filter((step) => step.mapLngLat && step.local).length;
+  const routePoseSpreadM = routePoseSpreadMeters({ route_steps: routeProgress });
+  const routePoseReady = routePoseCount >= MIN_ROUTE_STEPS && routePoseSpreadM >= MIN_ANCHOR_SPREAD_M;
+  const routeMotionReady = motionSummary.sampleCount < 3 || motionSummary.motionScore >= 0.3 || motionSummary.parallaxScore >= 0.25;
   const requiredFramesReady = frames.length >= MIN_SCAN_KEYFRAMES;
   const routeReady = routeProgress.length >= MIN_ROUTE_STEPS;
   const anchorCountReady = alignedAnchorCount >= MIN_ALIGNED_ANCHORS;
   const anchorSpreadReady = alignedAnchorCount < MIN_ALIGNED_ANCHORS || anchorSpreadM >= MIN_ANCHOR_SPREAD_M;
   const manualAnchorsStrong = anchorCountReady && anchorSpreadReady;
-  const readyToUpload = Boolean(session && uploadPrefix && requiredFramesReady && routeReady);
+  const noGpuAlignmentReady = manualAnchorsStrong || routePoseReady;
+  const readyToUpload = Boolean(session && uploadPrefix && requiredFramesReady && routeReady && deviceQualityReady && noGpuAlignmentReady && (manualAnchorsStrong || routeMotionReady));
   const selectedAnchor = anchorTargets.find((candidate) => candidate.id === selectedAnchorId) ?? null;
   const hasMapAnchorTargets = anchorTargets.some((target) => Boolean(target.mapLngLat && target.local));
   const currentStatus = session?.status ?? "created";
@@ -416,13 +435,25 @@ export default function GardenMobileScan() {
     ? `${Math.max(0, MIN_ROUTE_STEPS - routeProgress.length)} rutepunkter mangler`
     : !requiredFramesReady
       ? `${Math.max(0, MIN_SCAN_KEYFRAMES - frames.length)} keyframes mangler`
+      : !deviceQualityReady
+        ? `${Math.max(0, MIN_USABLE_SCAN_KEYFRAMES - deviceQuality.usableFrameCount)} skarpe billeder mangler`
+      : !noGpuAlignmentReady
+        ? "route-poser eller ankre mangler"
+      : !manualAnchorsStrong && !routeMotionReady
+        ? "mere bevægelse mangler"
       : "";
   const readinessHint = !routeReady
     ? currentRouteStep?.instruction ?? "Følg ruten og hold kameraet peget mod havens midte."
     : !requiredFramesReady
       ? "Ruten er dækket. Gå lidt langsommere videre, så kameraet får flere vinkler."
+      : !deviceQualityReady
+        ? "Hold telefonen mere roligt og undgå mørke/skarpt modlys, så flere keyframes kan bruges."
+      : !noGpuAlignmentReady
+        ? "Gennemfør route-poserne på kortet eller tilføj 2 manuelle ankre, så no-GPU worker kan placere scannet."
+      : !manualAnchorsStrong && !routeMotionReady
+        ? "Gå lidt mere rundt med haven i billedet. Telefonens motion/parallax hjælper workerens alignment."
       : !manualAnchorsStrong
-        ? "Klar til upload. Manuelle ankre er valgfrie, men giver bedre alignment på kortet."
+        ? "Klar til upload med route-poser fra telefonen. Manuelle ankre er stadig stærkere."
         : anchorSpreadM < RECOMMENDED_ANCHOR_SPREAD_M
           ? "Klar til upload. Et ekstra anker længere væk kan styrke alignment."
           : "Klar til upload med stærk rute og manuelle ankre.";
@@ -623,6 +654,18 @@ export default function GardenMobileScan() {
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      let quality: DeviceFrameQuality = {
+        brightness: 0,
+        contrast: 0,
+        sharpness: 0,
+        usable: false,
+        warnings: ["quality_analysis_failed"],
+      };
+      try {
+        quality = analyzeDeviceFrameQuality(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      } catch {
+        /* Some browser privacy modes can block pixel reads. Upload still carries a warning. */
+      }
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
       if (!blob) return null;
       const id = `frame-${String(frameIndexRef.current + 1).padStart(3, "0")}`;
@@ -638,6 +681,7 @@ export default function GardenMobileScan() {
         width: canvas.width,
         height: canvas.height,
         source,
+        quality,
       };
       setFrames((prev) => [...prev, frame]);
       return frame;
@@ -695,6 +739,10 @@ export default function GardenMobileScan() {
       });
       return;
     }
+    const routeIndex = ROUTE_STEPS.findIndex((step) => step.id === currentRouteStep.id);
+    const bounds = boundsForMap(mapFrame, anchorTargets);
+    const localPose = bounds && routeIndex >= 0 ? routePointsForBounds(bounds)[routeIndex] ?? null : null;
+    const mapLngLat = localPose && mapFrame?.center ? localToLngLat(localPose, mapFrame.center) : null;
     setRouteProgress((prev) => {
       if (prev.some((step) => step.id === currentRouteStep.id)) return prev;
       return [
@@ -705,6 +753,16 @@ export default function GardenMobileScan() {
           completedAt: new Date().toISOString(),
           captureSeconds,
           evidenceFrameId: frame?.id ?? frames.at(-1)?.id ?? null,
+          mapLngLat,
+          local: localPose,
+          poseConfidence: mapLngLat && localPose
+            ? Number(Math.min(0.68, 0.4 + deviceQuality.qualityScore * 0.16 + motionSummary.parallaxScore * 0.12).toFixed(2))
+            : null,
+          frameCountAtStep: frames.length + (frame ? 1 : 0),
+          usableFrameCountAtStep: deviceQuality.usableFrameCount,
+          motionSampleCount: motionSummary.sampleCount,
+          deviceQualityScore: deviceQuality.qualityScore,
+          motionScore: motionSummary.motionScore,
         },
       ];
     });
@@ -759,6 +817,20 @@ export default function GardenMobileScan() {
     const targets = buildUploadTargets(uploadPrefix);
     const byKind = Object.fromEntries(targets.map((target) => [target.kind, target.path])) as Record<string, string>;
     const completedAt = new Date().toISOString();
+    const routePoseHints = routeProgress
+      .filter((step) => step.mapLngLat && step.local)
+      .map((step) => ({
+        id: step.id,
+        label: step.label,
+        source: "guided_route" as const,
+        mapLngLat: step.mapLngLat!,
+        local: step.local!,
+        confidence: step.poseConfidence ?? 0.46,
+        evidenceFrameId: step.evidenceFrameId ?? null,
+        completedAt: step.completedAt,
+        motionScore: step.motionScore ?? motionSummary.motionScore,
+        deviceQualityScore: step.deviceQualityScore ?? deviceQuality.qualityScore,
+      }));
     const manifest: GardenScanManifest = {
       version: 1,
       session_id: session.id,
@@ -787,8 +859,19 @@ export default function GardenMobileScan() {
         route_step_count: ROUTE_STEPS.length,
         completed_route_steps: routeProgress.length,
         route_progress: Number(Math.min(1, routeProgress.length / MIN_ROUTE_STEPS).toFixed(2)),
-        coverage_score: Math.min(0.96, 0.18 + frames.length * 0.045 + routeProgress.length * 0.12 + Math.min(alignedAnchorCount, RECOMMENDED_ALIGNED_ANCHORS) * 0.04),
-        low_light: null,
+        coverage_score: Math.min(0.96, 0.18 + frames.length * 0.045 + routeProgress.length * 0.12 + Math.min(alignedAnchorCount, RECOMMENDED_ALIGNED_ANCHORS) * 0.04 + Math.min(routePoseHints.length, MIN_ROUTE_STEPS) * 0.025),
+        route_pose_count: routePoseHints.length,
+        route_pose_spread_m: routePoseSpreadM,
+        motion_score: motionSummary.motionScore,
+        parallax_score: motionSummary.parallaxScore,
+        motion_summary: motionSummary,
+        device_quality_score: deviceQuality.qualityScore,
+        usable_keyframe_count: deviceQuality.usableFrameCount,
+        blurry_frame_count: deviceQuality.blurryFrameCount,
+        low_light_frame_count: deviceQuality.lowLightFrameCount,
+        overexposed_frame_count: deviceQuality.overexposedFrameCount,
+        quality_summary: deviceQuality,
+        low_light: deviceQuality.lowLightFrameCount > 0,
       },
       anchors,
       route: {
@@ -796,7 +879,13 @@ export default function GardenMobileScan() {
         camera_target: "garden_center",
         required_step_count: MIN_ROUTE_STEPS,
         steps: routeProgress,
+        pose_hints: routePoseHints,
       },
+      deviceMotion: motionSummary,
+      deviceFrameQuality: frames.map((frame) => ({
+        frameId: frame.id,
+        ...frame.quality,
+      })),
       files: {
         manifest: byKind.manifest,
         tracking: byKind.tracking,
@@ -823,6 +912,7 @@ export default function GardenMobileScan() {
         width: frame.width,
         height: frame.height,
         source: frame.source,
+        quality: frame.quality,
       })),
     };
     const tracking = {
@@ -844,8 +934,21 @@ export default function GardenMobileScan() {
         recommended_route_steps: RECOMMENDED_ROUTE_STEPS,
         recommended_anchors: RECOMMENDED_ALIGNED_ANCHORS,
         recommended_anchor_spread_m: RECOMMENDED_ANCHOR_SPREAD_M,
+        route_pose_count: routePoseHints.length,
+        route_pose_spread_m: routePoseSpreadM,
+        motion_score: motionSummary.motionScore,
+        parallax_score: motionSummary.parallaxScore,
+        motion_summary: motionSummary,
+        device_quality_score: deviceQuality.qualityScore,
+        usable_keyframe_count: deviceQuality.usableFrameCount,
+        blurry_frame_count: deviceQuality.blurryFrameCount,
+        low_light_frame_count: deviceQuality.lowLightFrameCount,
+        overexposed_frame_count: deviceQuality.overexposedFrameCount,
+        quality_summary: deviceQuality,
       },
       device_motion_samples: motionSamplesRef.current,
+      device_motion_summary: motionSummary,
+      route_pose_hints: routePoseHints,
       route_steps: routeProgress,
       anchors,
     };
@@ -887,6 +990,17 @@ export default function GardenMobileScan() {
             aligned_anchor_count: alignedAnchorCount,
             anchor_spread_m: anchorSpreadM,
             motion_samples: motionSamplesRef.current.length,
+            route_pose_count: routePoseHints.length,
+            route_pose_spread_m: routePoseSpreadM,
+            motion_score: motionSummary.motionScore,
+            parallax_score: motionSummary.parallaxScore,
+            motion_summary: motionSummary,
+            device_quality_score: deviceQuality.qualityScore,
+            usable_keyframe_count: deviceQuality.usableFrameCount,
+            blurry_frame_count: deviceQuality.blurryFrameCount,
+            low_light_frame_count: deviceQuality.lowLightFrameCount,
+            overexposed_frame_count: deviceQuality.overexposedFrameCount,
+            quality_summary: deviceQuality,
           },
         },
       });
@@ -981,6 +1095,8 @@ export default function GardenMobileScan() {
             <span><Camera size={13} /> {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} auto</span>
             <span><Footprints size={13} /> {routeProgressLabel} rute</span>
             <span><CircleDot size={13} /> {alignedAnchorCount} ankre</span>
+            <span><CheckCircle2 size={13} /> {deviceQuality.usableFrameCount} {deviceQualityLabel}</span>
+            <span><Activity size={13} /> {motionLabel}</span>
           </div>
           {state === "camera" && manualAnchorMode && selectedAnchor && (
             <div className="mobile-scan-target-hint">
@@ -1041,6 +1157,9 @@ export default function GardenMobileScan() {
             <div className="mobile-scan-readiness" aria-live="polite">
               <span className={routeReady ? "is-done" : ""}><Footprints size={14} /> {routeProgressLabel} rute</span>
               <span className={requiredFramesReady ? "is-done" : ""}><CheckCircle2 size={14} /> {Math.min(frames.length, MIN_SCAN_KEYFRAMES)}/{MIN_SCAN_KEYFRAMES} billeder</span>
+              <span className={deviceQualityReady ? "is-done" : ""}><Camera size={14} /> {deviceQuality.usableFrameCount}/{MIN_USABLE_SCAN_KEYFRAMES} skarpe</span>
+              <span className={routePoseReady ? "is-done" : ""}><MapPinned size={14} /> {routePoseCount}/{MIN_ROUTE_STEPS} pose</span>
+              <span className={manualAnchorsStrong || routeMotionReady ? "is-done" : ""}><Activity size={14} /> {motionLabel}</span>
               <span className={manualAnchorsStrong ? "is-done" : ""}><CircleDot size={14} /> {alignedAnchorCount} manuelle</span>
             </div>
             {ROUTE_STEPS.map((step, index) => (
@@ -1078,7 +1197,7 @@ export default function GardenMobileScan() {
 
         <footer className="mobile-scan-footer">
           <span>{footerHint}</span>
-          <small>{routeProgressLabel} rute · {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} billeder · {alignedAnchorCount}/{RECOMMENDED_ALIGNED_ANCHORS} manuelle ankre</small>
+          <small>{routeProgressLabel} rute · {frames.length}/{RECOMMENDED_SCAN_KEYFRAMES} billeder · {deviceQuality.usableFrameCount} brugbare · {routePoseCount} pose · {motionLabel} bevægelse · {alignedAnchorCount}/{RECOMMENDED_ALIGNED_ANCHORS} manuelle ankre</small>
         </footer>
       </section>
     </div>

@@ -30,6 +30,7 @@ const MIN_SCAN_KEYFRAMES = 8;
 const MIN_ALIGNED_ANCHORS = 2;
 const MIN_ANCHOR_SPREAD_M = 3;
 const MIN_ROUTE_STEPS = 4;
+const MIN_ROUTE_POSE_HINTS = 4;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -44,6 +45,7 @@ function isDepthModelCandidate(value: unknown) {
   const terrain = row.terrain as Record<string, unknown> | undefined;
   const alignment = row.alignment as Record<string, unknown> | undefined;
   const quality = row.quality as Record<string, unknown> | undefined;
+  const twin = row.twin as Record<string, unknown> | undefined;
   return row.version === 1
     && row.units === "meters"
     && Array.isArray(row.center)
@@ -53,7 +55,9 @@ function isDepthModelCandidate(value: unknown) {
     && Boolean(alignment)
     && typeof alignment?.confidence === "number"
     && Boolean(quality)
-    && typeof quality?.score === "number";
+    && typeof quality?.score === "number"
+    && Boolean(twin)
+    && twin?.scope === "full";
 }
 
 function depthModelIssues(value: unknown) {
@@ -64,12 +68,25 @@ function depthModelIssues(value: unknown) {
   const quality = row.quality as Record<string, unknown>;
   const terrain = row.terrain as Record<string, unknown>;
   const objects = row.objects as Array<Record<string, unknown>>;
+  const twin = row.twin as Record<string, unknown>;
+  const twinRole = twin.role as Record<string, unknown> | undefined;
+  const twinModel = twin.model as Record<string, unknown> | undefined;
+  const twinEvidence = twin.evidence as Record<string, unknown> | undefined;
   if ((alignment.confidence as number) < 0 || (alignment.confidence as number) > 1) issues.push("alignment_confidence_out_of_range");
   if ((quality.score as number) < 0 || (quality.score as number) > 100) issues.push("quality_score_out_of_range");
   if (!Array.isArray(terrain.boundary) || terrain.boundary.length < 3) issues.push("missing_boundary");
+  if (!twinRole || twinRole.visual !== true || twinRole.operational !== true) issues.push("invalid_twin_scope");
+  if (twin.confidencePolicy !== "truthful-confidence") issues.push("invalid_confidence_policy");
+  if (!twinModel || typeof twinModel.name !== "string" || typeof twinModel.version !== "string") issues.push("missing_twin_model_metadata");
+  if (twinModel && twinModel.commercialUseApproved !== true) issues.push("model_license_not_production_approved");
+  if (!twinEvidence || typeof twinEvidence.keyframeCount !== "number") issues.push("missing_twin_evidence");
   if (!objects.every((object) => Array.isArray(object.footprint) && object.footprint.length >= 3)) issues.push("object_with_invalid_footprint");
   if (!objects.every((object) => typeof object.confidence === "number" && object.confidence >= 0 && object.confidence <= 1)) issues.push("object_confidence_out_of_range");
-  if (alignment.mode === "scan-anchored" && typeof alignment.anchorCount === "number" && alignment.anchorCount < 2) issues.push("scan_alignment_requires_anchors");
+  if (alignment.mode === "scan-anchored") {
+    const anchorCount = typeof alignment.anchorCount === "number" ? alignment.anchorCount : 0;
+    const routePoseCount = typeof alignment.routePoseCount === "number" ? alignment.routePoseCount : 0;
+    if (anchorCount < MIN_ALIGNED_ANCHORS && routePoseCount < MIN_ROUTE_POSE_HINTS) issues.push("scan_alignment_requires_anchors_or_route_poses");
+  }
   return issues;
 }
 

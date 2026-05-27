@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { Box, Eye, Layers3, Mountain, ShieldCheck } from "lucide-react";
+import { Box, Eye, Layers3, Map, Mountain, ShieldCheck } from "lucide-react";
 import type { GardenDepthModel, GardenDepthObject, LocalPoint } from "@/lib/gardenDepth";
 import { depthConfidenceLabel, lngLatToLocal } from "@/lib/gardenDepth";
 
@@ -45,13 +45,27 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
     if (!model) return null;
     const scanObjects = model.objects.filter((object) => object.source === "user_scan" || object.source === "ai_reconstruction").length;
     const scanAligned = model.alignment.mode === "scan-anchored";
+    const twinStatus = model.twin.status === "scan_aligned"
+      ? "Scan-aligned"
+      : model.twin.status === "needs_review"
+        ? "Kræver review"
+        : model.twin.status === "evidence_ready"
+          ? "Evidens klar"
+          : "Draft";
     return {
       objects: model.objects.length,
       confidence: Math.round(model.alignment.confidence * 100),
       quality: model.quality.score,
       grade: model.quality.grade,
-      source: scanAligned || scanObjects ? "Mobilscan" : "Flad kort-preview",
+      source: scanAligned || scanObjects ? "Full garden twin" : "Flad kort-preview",
       scanAligned,
+      twinStatus,
+      keyframes: model.twin.evidence.keyframeCount,
+      routePoses: model.twin.evidence.routePoseCount ?? 0,
+      motionScore: model.twin.evidence.motionScore ?? 0,
+      unknownRegions: model.terrain.unknownRegions.length,
+      modelName: model.twin.model.name,
+      licenseReady: model.twin.model.commercialUseApproved,
       area: model.terrain.areaM2 ? `${Math.round(model.terrain.areaM2)} m2` : "ukendt areal",
     };
   }, [model]);
@@ -159,24 +173,33 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
         <div>
           <div className="garden-twin-eyebrow">3D Garden Twin</div>
           <strong>{model.name || "Din have"}</strong>
-          <span>{stats.source} · {stats.area} · {stats.grade}</span>
+          <span>{stats.source} · {stats.twinStatus} · {stats.area} · {stats.grade}</span>
         </div>
         <div className="garden-twin-kpis">
           <span><Box size={13} /> {stats.objects} objekter</span>
           <span><ShieldCheck size={13} /> {stats.scanAligned ? `${stats.confidence}% alignment` : "ikke scannet"}</span>
           <span><Mountain size={13} /> {stats.quality}/100 kvalitet</span>
+          {stats.keyframes > 0 && <span><Layers3 size={13} /> {stats.keyframes} keyframes</span>}
+          {stats.routePoses > 0 && <span><Map size={13} /> {stats.routePoses} route-poser</span>}
+          {stats.motionScore > 0 && <span><Eye size={13} /> {Math.round(stats.motionScore * 100)}% motion</span>}
           {warningCount > 0 && <span><Eye size={13} /> {warningCount} estimater</span>}
         </div>
       </div>
       {!stats.scanAligned && (
         <div className="garden-twin-unscanned">
-          Flad preview fra 2D-kortet. Højder, træer, hegn og forhindringer kommer først efter mobilscan.
+          Flad preview fra 2D-kortet. Højder, træer, hegn og forhindringer kommer først efter en scan-anchored garden twin.
+        </div>
+      )}
+      {stats.scanAligned && (model.twin.status === "needs_review" || stats.unknownRegions > 0 || !stats.licenseReady) && (
+        <div className="garden-twin-unscanned">
+          Truthful confidence: {stats.unknownRegions} ukendte regioner · model {stats.modelName}{stats.licenseReady ? "" : " · licens mangler prod-godkendelse"}.
         </div>
       )}
       <div className="garden-twin-toggles" aria-label="3D lag">
         <Toggle active={toggles.objects} icon={<Layers3 size={14} />} label="Objekter" onClick={() => setToggles((prev) => ({ ...prev, objects: !prev.objects }))} />
         <Toggle active={toggles.heights} icon={<Mountain size={14} />} label="Højde" onClick={() => setToggles((prev) => ({ ...prev, heights: !prev.heights }))} />
         <Toggle active={toggles.confidence} icon={<ShieldCheck size={14} />} label="Sikkerhed" onClick={() => setToggles((prev) => ({ ...prev, confidence: !prev.confidence }))} />
+        <Toggle active={toggles.unknown} icon={<Eye size={14} />} label="Ukendt" onClick={() => setToggles((prev) => ({ ...prev, unknown: !prev.unknown }))} />
       </div>
       {!compact && (
         <div className="garden-twin-legend">

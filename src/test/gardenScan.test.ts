@@ -16,6 +16,11 @@ function routeStep(index: number) {
     completedAt: "2026-05-24T10:00:00.000Z",
     captureSeconds: index * 8,
     evidenceFrameId: `frame-${index}`,
+    mapLngLat: [12 + index * 0.00008, 55 + index * 0.00002] as [number, number],
+    local: { x: index * 5, z: index * 2 },
+    poseConfidence: 0.52,
+    motionScore: 0.48,
+    deviceQualityScore: 0.7,
   };
 }
 
@@ -46,6 +51,10 @@ function manifest(overrides: Partial<GardenScanManifest> = {}): GardenScanManife
       completed_route_steps: MIN_ROUTE_STEPS,
       route_progress: 1,
       coverage_score: 0.82,
+      route_pose_count: MIN_ROUTE_STEPS,
+      route_pose_spread_m: 15,
+      motion_score: 0.48,
+      parallax_score: 0.36,
       low_light: false,
     },
     anchors: [],
@@ -54,6 +63,15 @@ function manifest(overrides: Partial<GardenScanManifest> = {}): GardenScanManife
       camera_target: "garden_center",
       required_step_count: MIN_ROUTE_STEPS,
       steps,
+      pose_hints: steps.map((step) => ({
+        id: step.id,
+        label: step.label,
+        source: "guided_route" as const,
+        mapLngLat: step.mapLngLat,
+        local: step.local,
+        confidence: step.poseConfidence,
+        evidenceFrameId: step.evidenceFrameId,
+      })),
     },
     files: {
       manifest: "user/session/manifest.json",
@@ -111,6 +129,8 @@ describe("garden scan manifest route gates", () => {
         keyframe_count: 12,
         route_step_count: MIN_ROUTE_STEPS,
         completed_route_steps: MIN_ROUTE_STEPS,
+        route_pose_count: MIN_ROUTE_STEPS,
+        route_pose_spread_m: 15,
       },
       warnings: ["manual_anchors_missing"],
     });

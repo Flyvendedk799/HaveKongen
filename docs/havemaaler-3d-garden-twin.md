@@ -4,6 +4,8 @@
 
 Havemåler is satellite-first. The web app owns garden identity, lawn polygons, exclusions, ortofoto context, and the persisted `gardens.depth_model`. Mobile web capture and backend reconstruction are producers of better evidence for that same depth model. The default user flow must work in the browser without App Store installation.
 
+`gardens.depth_model` is the shared full garden twin contract. It must be both visual and operational: the Three.js viewer, Havekompagnon, watering, wildlife, commerce fit checks, and future devices all read the same model. The model must use `twin.confidencePolicy = "truthful-confidence"`: uncertain heights, hidden surfaces, weak alignment, and unseen regions are stored as estimates, warnings, or `terrain.unknownRegions`, not as fake precision.
+
 ## Scan Session Lifecycle
 
 Statuses in `garden_scan_sessions.status`:
@@ -35,8 +37,8 @@ Every state change should be represented in two places:
 
 The `create-garden-scan-session` Edge Function returns `upload_targets` in the private `garden-scans` bucket. Required files:
 
-- `manifest.json`: session metadata, device, capture duration, file references, anchor list.
-- `tracking.json`: browser device-motion samples, capture-local evidence, anchor observations, and tracking quality.
+- `manifest.json`: session metadata, device, capture duration, file references, anchor list, phone quality summary, and guided route pose hints.
+- `tracking.json`: browser device-motion samples, motion/parallax summary, capture-local evidence, anchor observations, route pose hints, and tracking quality.
 - `keyframes.json`: selected camera frame metadata with storage paths, timestamps, and frame IDs.
 
 Optional:
@@ -45,7 +47,9 @@ Optional:
 - `capture.webm`: browser video where supported.
 - `frames/*.jpg`: individual uploaded keyframes referenced by `keyframes.json`.
 
-Mobile capture should include 2-4 anchors that are visible in both satellite and real-world capture. Each anchor should include map lng/lat, camera image point or AR-local evidence, label, confidence, and evidence frame IDs. Anchors without both a map point and a camera/capture point are stored as weak evidence but do not count toward alignment readiness.
+Mobile capture should include 2-4 anchors that are visible in both satellite and real-world capture. Each anchor should include map lng/lat, camera image point or AR-local evidence, label, confidence, and evidence frame IDs. Anchors without both a map point and a camera/capture point are stored as weak evidence but do not count toward manual-anchor readiness.
+
+When manual anchors are missing, the mobile browser can still contribute low-confidence no-GPU alignment through guided route poses. Each completed route checkpoint should store approximate map lng/lat, local garden coordinate, evidence frame, device image quality, phone motion/parallax score, and confidence. Route poses are not precise photogrammetry; they allow a truthful `needs_review` twin when evidence is good enough, and otherwise trigger `needs_anchor_correction`.
 
 The browser capture flow should automatically collect keyframes while the camera is open. Manual keyframe buttons are only for extra coverage. V1 gates use 8 keyframes as the minimum upload threshold and 18 keyframes as the recommended threshold for stronger reconstruction.
 
@@ -53,9 +57,11 @@ Minimum manifest quality gates:
 
 - `version = 1`
 - `session_id` and `garden_id` match the session
-- at least 2 alignable anchors, 4 recommended
+- at least 2 alignable anchors, or 4 guided route poses with enough spread for low-confidence no-GPU alignment; 4 manual anchors are recommended
 - alignable anchors should be separated by at least 3 meters on the map; 8+ meters is preferred
+- route poses should be separated by at least 3 meters on the map; 8+ meters is preferred
 - at least 8 keyframes, 18 recommended
+- phone-side usable keyframe, brightness, contrast, sharpness, motion, and parallax summaries should be persisted
 - `tracking.json` and `keyframes.json` are present
 - uploaded manifest paths must stay inside the session upload prefix
 - capture duration is ideally 45-90 seconds
@@ -81,13 +87,15 @@ Rules:
 The worker should:
 
 1. Read a session in `uploaded`.
-2. Mark it `processing`.
+2. Claim it atomically with `claim_garden_scan_session` or `claim_next_garden_scan_session`, which moves it to `processing`.
 3. Fetch scan package files by storage path.
-4. Align browser capture evidence to garden lng/lat using anchors.
-5. Fuse keyframe segmentation, multi-view reconstruction, and satellite geometry.
+4. Align browser capture evidence to garden lng/lat using manual anchors when available, or guided route poses as a low-confidence no-GPU fallback.
+5. Fuse keyframe quality, phone motion/parallax, route coverage, future segmentation/multi-view reconstruction, and satellite geometry.
 6. Produce `GardenDepthModel`.
 7. Call `complete-garden-scan-session` with `status = "ready"` and `result_json`.
 
 If alignment residual is too high, call `complete-garden-scan-session` with `status = "needs_anchor_correction"`, `warnings`, and `error_detail`.
 
 The worker should claim work by moving `uploaded` to `processing`, incrementing `processing_attempts`, and setting `claimed_by`. Repeated attempts should be visible in the UI and event log.
+
+`process-garden-scan-session` is the browser-first worker entrypoint. It is protected by `GARDEN_SCAN_WORKER_SECRET`, reads private `garden-scans` artifacts with the service role, requires either strong map/camera anchor evidence or truthful guided-route pose evidence before writing a scan-anchored twin, and records model/provider/license metadata under `twin.model`. Production-ready `ready` results require commercially approved model metadata.
