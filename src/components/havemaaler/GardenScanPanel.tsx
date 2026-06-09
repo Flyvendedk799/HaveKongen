@@ -12,9 +12,12 @@ type Props = {
   canPreview: boolean;
   canStartScan: boolean;
   scanButtonLabel?: string;
+  saveLaterLabel?: string;
   onBuildPreview: () => void;
   onStartScan: () => void;
+  onSaveLater?: () => void;
   onShowTwin: () => void;
+  canSaveLater?: boolean;
 };
 
 export default function GardenScanPanel({
@@ -25,9 +28,12 @@ export default function GardenScanPanel({
   canPreview,
   canStartScan,
   scanButtonLabel,
+  saveLaterLabel,
   onBuildPreview,
   onStartScan,
+  onSaveLater,
   onShowTwin,
+  canSaveLater = true,
 }: Props) {
   const summary = depthModel ? summarizeDepthModel(depthModel) : null;
   const inspection = depthModel ? inspectGardenDepthModel(depthModel) : null;
@@ -95,13 +101,18 @@ export default function GardenScanPanel({
         </div>
       )}
 
-      <div className="garden-scan-panel__actions">
+      <div className={`garden-scan-panel__actions ${onSaveLater ? "garden-scan-panel__actions--four" : ""}`}>
         <button type="button" onClick={onBuildPreview} disabled={!canPreview}>
           <Layers3 size={14} /> Flad preview
         </button>
         <button type="button" className="garden-scan-panel__scan-action" onClick={onStartScan} disabled={!canStartScan || starting}>
           {starting ? <UploadCloud size={14} /> : <Play size={14} />} {starting ? "Klargør..." : resolvedScanButtonLabel}
         </button>
+        {onSaveLater && (
+          <button type="button" onClick={onSaveLater} disabled={!canSaveLater || starting}>
+            <CheckCircle2 size={14} /> {saveLaterLabel ?? "Scan senere"}
+          </button>
+        )}
         <button type="button" onClick={onShowTwin} disabled={!depthModel}>
           <ExternalLink size={14} /> Vis 3D
         </button>

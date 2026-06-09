@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
+import GardenThumbnailImage from "@/components/garden/GardenThumbnailImage";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
@@ -54,8 +55,18 @@ export default function MinHave() {
   const [events, setEvents] = useState<Event[]>([]);
   const [todayWeather, setTodayWeather] = useState<Weather | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
 
   useEffect(() => { document.title = "Min have — Havekongen"; }, []);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
+      if (!cancelled && !error && typeof data?.token === "string") setMapboxToken(data.token);
+    }).catch(() => {
+      /* Satellite thumbnails are best effort in Min have. */
+    });
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { if (!authLoading && !user) navigate("/login?next=/min-have"); }, [user, authLoading, navigate]);
 
   useEffect(() => {
@@ -271,13 +282,17 @@ export default function MinHave() {
                   background: "var(--ink-50)",
                   marginBottom: 14,
                 }}>
-                  {activeGarden.thumbnail_url ? (
-                    <img src={activeGarden.thumbnail_url} alt={activeGarden.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--ink-500)" }}>
-                      Intet kortbillede endnu
-                    </div>
-                  )}
+                  <GardenThumbnailImage
+                    garden={activeGarden}
+                    mapboxToken={mapboxToken}
+                    alt={activeGarden.name}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    fallback={
+                      <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--ink-500)" }}>
+                        Intet kortbillede endnu
+                      </div>
+                    }
+                  />
                   {activeGarden.area_m2 && (
                     <div style={{
                       position: "absolute", bottom: 10, left: 10,

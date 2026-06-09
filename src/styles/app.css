@@ -610,6 +610,9 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
+.garden-scan-panel__actions--four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .garden-scan-panel__actions button,
 .garden-scan-launch a {
   min-height: 36px;

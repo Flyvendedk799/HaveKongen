@@ -3,6 +3,7 @@ import type { ChangeEvent, CSSProperties, ElementType, FormEvent, ReactNode } fr
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Bell, Bot, CalendarDays, CheckCircle2, CloudSun, Database, Link2, MapPinned, PauseCircle, PlugZap, RefreshCcw, Ruler, ShieldCheck, Sparkles } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
+import GardenThumbnailImage from "@/components/garden/GardenThumbnailImage";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
@@ -20,7 +21,7 @@ import { toast } from "sonner";
 import "@/styles/account.css";
 
 type Profile = Pick<Tables<"profiles">, "name" | "address" | "postal_code" | "avatar_url">;
-type Garden = Pick<Tables<"gardens">, "id" | "name" | "area_m2" | "address" | "thumbnail_url">;
+type Garden = Pick<Tables<"gardens">, "id" | "name" | "area_m2" | "address" | "thumbnail_url" | "latitude" | "longitude">;
 type Order = Pick<Tables<"orders">, "id" | "created_at" | "total_dkk" | "status">;
 type Device = Pick<Tables<"devices">, "id" | "name" | "kind" | "status" | "battery" | "garden_id">;
 type WishProduct = Pick<Tables<"products">, "id" | "slug" | "name" | "base_price_dkk" | "gradient" | "svg_art">;
@@ -72,6 +73,17 @@ export default function Account() {
   const [profileSync, setProfileSync] = useState<ProfileSync>(DEFAULT_PROFILE_SYNC);
   const [savingProfile, setSavingProfile] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState<string | null>(null);
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
+      if (!cancelled && !error && typeof data?.token === "string") setMapboxToken(data.token);
+    }).catch(() => {
+      /* Satellite thumbnails are best effort on account cards. */
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!loading && !user) nav("/login?next=/konto");
@@ -82,7 +94,7 @@ export default function Account() {
     (async () => {
       const [{ data: p }, { data: g }, { data: o }, { data: d }, { data: c }, { count }, { data: w }] = await Promise.all([
         supabase.from("profiles").select("name, address, postal_code, avatar_url").eq("id", user.id).maybeSingle(),
-        supabase.from("gardens").select("id, name, area_m2, address, thumbnail_url").order("created_at", { ascending: false }),
+        supabase.from("gardens").select("id, name, area_m2, address, thumbnail_url, latitude, longitude").order("created_at", { ascending: false }),
         supabase.from("orders").select("id, created_at, total_dkk, status").order("created_at", { ascending: false }).limit(5),
         supabase.from("devices").select("id, name, kind, status, battery, garden_id").order("created_at", { ascending: false }),
         supabase.from("integration_connections").select("*").order("updated_at", { ascending: false }),
@@ -389,8 +401,15 @@ export default function Account() {
                   }}>
                     <div style={{
                       aspectRatio: "16/10",
-                      background: g.thumbnail_url ? `url(${g.thumbnail_url}) center/cover` : "linear-gradient(135deg, var(--forest-800), var(--ochre-600))",
-                    }} />
+                      background: "linear-gradient(135deg, var(--forest-800), var(--ochre-600))",
+                    }}>
+                      <GardenThumbnailImage
+                        garden={g}
+                        mapboxToken={mapboxToken}
+                        alt={g.name}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                      />
+                    </div>
                     <div style={{ padding: 14, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
                       <div style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</div>
                       <div style={{ fontSize: 12, color: "var(--ink-500)" }}>{g.address ?? "—"}</div>

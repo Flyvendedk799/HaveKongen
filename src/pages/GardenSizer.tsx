@@ -48,6 +48,7 @@ import {
 } from "@/lib/havemaalerGeometry";
 import { isTerminalScanStatus, scanCanStartNewSession, webGardenScanUrl } from "@/lib/gardenScan";
 import type { GardenScanSession, ScanUploadTarget } from "@/lib/gardenScan";
+import { gardenStaticSatelliteUrl } from "@/lib/gardenThumbnail";
 
 type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" | "mapbox" };
 type Mode = "draw" | "exclude" | "edit" | "wand";
@@ -891,6 +892,7 @@ export default function GardenSizer() {
         ? (editingGarden?.id ? "Scan haven i 3D" : "Gem & scan haven")
         : "Fortsæt 3D-scan";
   const scanPanelButtonLabel = !generatedDepthModel ? "Tegn først" : !editingGarden?.id ? "Gem & scan" : undefined;
+  const saveLaterLabel = editingGarden?.id ? "Gem måling" : "Scan senere";
 
   function requireLoginForHavemaaler(message: string) {
     toast(message);
@@ -967,6 +969,58 @@ export default function GardenSizer() {
     if (!error) setScanSessions((data ?? []) as GardenScanSession[]);
   }
 
+  async function readMapCanvasThumbnailBlob() {
+    const map = mapRef.current;
+    if (!map) return null;
+    try {
+      return await new Promise<Blob | null>((resolve) => {
+        map.getCanvas().toBlob((blob) => resolve(blob), "image/jpeg", 0.78);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function readStaticSatelliteThumbnailBlob() {
+    if (!chosen || !mapboxToken) return null;
+    const url = gardenStaticSatelliteUrl({
+      thumbnail_url: null,
+      latitude: chosen.center[1],
+      longitude: chosen.center[0],
+    }, mapboxToken);
+    if (!url) return null;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      return await response.blob();
+    } catch {
+      return null;
+    }
+  }
+
+  async function uploadGardenThumbnail(blob: Blob) {
+    if (!user) return null;
+    const path = `${user.id}/${Date.now()}.jpg`;
+    const { error: upErr } = await supabase.storage
+      .from("garden-thumbnails")
+      .upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: true });
+    if (upErr) {
+      console.warn("garden thumbnail upload failed", upErr);
+      return null;
+    }
+    const { data: pub } = supabase.storage.from("garden-thumbnails").getPublicUrl(path);
+    return pub.publicUrl;
+  }
+
+  async function buildGardenThumbnailUrl(existingUrl: string | null) {
+    const canvasBlob = await readMapCanvasThumbnailBlob();
+    const blob = canvasBlob ?? (await readStaticSatelliteThumbnailBlob());
+    if (!blob) return existingUrl;
+    const thumbnailUrl = await uploadGardenThumbnail(blob);
+    return thumbnailUrl ?? existingUrl;
+  }
+
   async function persistMeasurement({ includeThumbnail }: { includeThumbnail: boolean }): Promise<{ garden: SavedGarden; depthModel: GardenDepthModel; softWarnings: string[] } | null> {
     if (!user) {
       requireLoginForHavemaaler(includeThumbnail ? "Log ind for at gemme din have" : "Log ind for at starte mobilscan");
@@ -980,21 +1034,7 @@ export default function GardenSizer() {
     try {
       let thumbnail_url: string | null = editingGarden?.thumbnail_url ?? null;
       if (includeThumbnail) {
-        try {
-          const map = mapRef.current;
-          if (map) {
-            const dataUrl = map.getCanvas().toDataURL("image/jpeg", 0.78);
-            const blob = await (await fetch(dataUrl)).blob();
-            const path = `${user.id}/${Date.now()}.jpg`;
-            const { error: upErr } = await supabase.storage.from("garden-thumbnails").upload(path, blob, { contentType: "image/jpeg", upsert: true });
-            if (!upErr) {
-              const { data: pub } = supabase.storage.from("garden-thumbnails").getPublicUrl(path);
-              thumbnail_url = pub.publicUrl;
-            }
-          }
-        } catch {
-          // Thumbnail is a visual convenience; persistence must still succeed without it.
-        }
+        thumbnail_url = await buildGardenThumbnailUrl(thumbnail_url);
       }
 
       const gardenPolygon = polygonForRings(completedLawns);
@@ -1984,6 +2024,9 @@ export default function GardenSizer() {
                   <button className="tool-btn scan-primary" onClick={startGardenScan} disabled={!canStartScanFromGeometry}>
                     {scanActionLabel}
                   </button>
+                  <button className="tool-btn" onClick={saveGarden} disabled={saving || area === 0}>
+                    {saving ? "Gemmer..." : saveLaterLabel}
+                  </button>
                   <button className="tool-btn" onClick={() => loadMatrikel()}>Hent matrikel</button>
                   {matrikel && <button className="tool-btn" onClick={useMatrikelAsBase}>Brug matrikel som plæne</button>}
                   <button className="tool-btn" onClick={refreshDepthPreview} disabled={!generatedDepthModel}>Vis flad 3D</button>
@@ -2039,13 +2082,16 @@ export default function GardenSizer() {
                   canPreview={Boolean(generatedDepthModel)}
                   canStartScan={canStartScanFromGeometry}
                   scanButtonLabel={scanPanelButtonLabel}
+                  saveLaterLabel={saveLaterLabel}
                   onBuildPreview={refreshDepthPreview}
                   onStartScan={startGardenScan}
+                  onSaveLater={saveGarden}
                   onShowTwin={() => { if (!activeDepthModel) refreshDepthPreview(); else setMapView("twin"); }}
+                  canSaveLater={area > 0 && !saving}
                 />
 
                 <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={saveGarden} disabled={saving || area === 0}>
-                  {saving ? (editingGarden ? "Opdaterer…" : "Gemmer…") : editingGarden ? "Opdater måling" : "Gem have og fortsæt"}
+                  {saving ? (editingGarden ? "Opdaterer…" : "Gemmer…") : saveLaterLabel}
                 </button>
                 <Link to="/webshop?cat=robot" className="btn btn-ghost" style={{ width: "100%", justifyContent: "center", marginTop: 10 }}>Se alle robotklippere</Link>
 
