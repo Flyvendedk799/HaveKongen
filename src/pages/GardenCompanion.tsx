@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Camera, Droplets, Leaf, Pencil, Plus, Sparkles, Sprout, Trash2 } from "lucide-react";
+import { ArrowRight, Camera, CloudSun, Droplets, GaugeCircle, Leaf, Pencil, Plus, Sparkles, Sprout, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { Button } from "@/components/ui/button";
@@ -297,16 +297,34 @@ export default function GardenCompanion() {
       <AppNav active="companion" />
       <main className="container companion-simple">
         <header className="page-head companion-simple-hero">
-          <div>
+          <div className="companion-simple-hero-copy">
             <div className="eyebrow">Havekompagnon</div>
-            <h1>Bede, planter og vanding — ikke mere støj.</h1>
-            <p className="lede">En fokuseret arbejdsside til at oprette bede, holde styr på planterne og vande rigtigt.</p>
+            <h1>Din have som et roligt kontrolrum.</h1>
+            <p className="lede">Planlæg bede, følg planterne og vand præcist fra én poleret arbejdsside med tydelige næste skridt.</p>
+            <div className="companion-simple-hero-actions">
+              <button type="button" onClick={() => garden && switchView("beds")} disabled={!garden}>
+                <Leaf size={16} /> Bede
+              </button>
+              <button type="button" onClick={() => garden && switchView("plants")} disabled={!garden}>
+                <Sprout size={16} /> Planter
+              </button>
+              <button type="button" onClick={() => garden && switchView("water")} disabled={!garden}>
+                <Droplets size={16} /> Vanding
+              </button>
+            </div>
           </div>
-          <div className="companion-simple-prompt-card">
-            <Sparkles size={18} />
-            <strong>3D prototype prompt</strong>
-            <span>Klar i docs til Claude-design integration.</span>
-            <a href="/docs/havekompagnon-3d-prototype-prompt.md" target="_blank" rel="noreferrer">Se prompt</a>
+          <div className="companion-simple-orbit-card" aria-label="Havekompagnon status">
+            <div className="companion-orbit-glow" />
+            <div className="companion-orbit-badge"><Sparkles size={14} /> Live haveplan</div>
+            <div className="companion-orbit-ring">
+              <span>{garden ? zones.length + allPlants.length + schedules.length : 0}</span>
+              <small>aktive spor</small>
+            </div>
+            <div className="companion-orbit-list">
+              <span><Leaf size={14} /> {garden?.name ?? "Ingen have valgt"}</span>
+              <span><CloudSun size={14} /> {forecasts[0] ? `${forecasts[0].precip_mm.toFixed(1)} mm regn i dag` : "Vejr kobles på automatisk"}</span>
+              <span><GaugeCircle size={14} /> {summary.savedL} L sparet af vejret</span>
+            </div>
           </div>
         </header>
 
@@ -330,10 +348,31 @@ export default function GardenCompanion() {
         ) : (
           <>
             <section className="companion-simple-stats" aria-label="Havekompagnon overblik">
-              <Stat icon={<Leaf size={18} />} label="Bede" value={zones.length} />
-              <Stat icon={<Sprout size={18} />} label="Planter" value={allPlants.reduce((sum, plant) => sum + plant.qty, 0)} />
-              <Stat icon={<Droplets size={18} />} label="Planlagt vand" value={`${summary.plannedL} L`} />
-              <Stat icon={<Sparkles size={18} />} label="Sparet af vejr" value={`${summary.savedL} L`} />
+              <Stat icon={<Leaf size={18} />} label="Bede" value={zones.length} tone="leaf" />
+              <Stat icon={<Sprout size={18} />} label="Planter" value={allPlants.reduce((sum, plant) => sum + plant.qty, 0)} tone="sprout" />
+              <Stat icon={<Droplets size={18} />} label="Planlagt vand" value={`${summary.plannedL} L`} tone="water" />
+              <Stat icon={<Sparkles size={18} />} label="Sparet af vejr" value={`${summary.savedL} L`} tone="gold" />
+            </section>
+
+            <section className="companion-simple-commandbar" aria-label="Hurtige havehandlinger">
+              <button type="button" onClick={() => { setEditingBed(undefined); setBedOpen(true); }}>
+                <span><Plus size={16} /></span>
+                <strong>Tilføj bed</strong>
+                <small>Navn, areal, sol og jord</small>
+                <ArrowRight size={16} />
+              </button>
+              <button type="button" onClick={() => zones[0] ? setAddPlantsZone(zones[0]) : setBedOpen(true)}>
+                <span><Sprout size={16} /></span>
+                <strong>Registrér planter</strong>
+                <small>{zones[0] ? `Start i ${zones[0].name}` : "Opret et bed først"}</small>
+                <ArrowRight size={16} />
+              </button>
+              <button type="button" onClick={() => switchView("water")}>
+                <span><Droplets size={16} /></span>
+                <strong>Se vandplan</strong>
+                <small>{nextRun ? nextRun.zone.name : "Manuel eller timer"}</small>
+                <ArrowRight size={16} />
+              </button>
             </section>
 
             <nav className="companion-simple-tabs" aria-label="Havekompagnon funktioner">
@@ -648,9 +687,9 @@ function WaterView({
   );
 }
 
-function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) {
+function Stat({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string | number; tone: "leaf" | "sprout" | "water" | "gold" }) {
   return (
-    <div className="water-card companion-simple-stat">
+    <div className={`water-card companion-simple-stat companion-simple-stat--${tone}`}>
       {icon}
       <span>{label}</span>
       <strong>{value}</strong>

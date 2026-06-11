@@ -2458,3 +2458,586 @@
     flex: 1 1 130px;
   }
 }
+
+/* 2026 visual lift for the focused Havekompagnon workspace. */
+.companion-simple {
+  --companion-surface: rgba(255, 255, 255, 0.78);
+  --companion-border: rgba(20, 39, 29, 0.1);
+  --companion-muted: rgba(90, 101, 94, 0.78);
+  --companion-ring: rgba(216, 166, 81, 0.42);
+  position: relative;
+  max-width: 1360px;
+  padding-bottom: 88px;
+}
+
+.companion-simple::before {
+  content: "";
+  position: fixed;
+  inset: 72px 0 auto 0;
+  height: 520px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(122, 158, 136, 0.34), transparent 27%),
+    radial-gradient(circle at 82% 6%, rgba(236, 199, 132, 0.38), transparent 30%),
+    linear-gradient(180deg, rgba(245, 242, 235, 0.92), rgba(251, 250, 245, 0));
+  filter: saturate(1.05);
+}
+
+.companion-simple .water-card {
+  border-color: rgba(20, 39, 29, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 248, 243, 0.88)),
+    var(--paper);
+  box-shadow: 0 20px 60px -46px rgba(20, 39, 29, 0.45);
+}
+
+.companion-simple-hero {
+  position: relative;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  align-items: stretch;
+  gap: clamp(18px, 3vw, 36px);
+  margin-top: 18px;
+  margin-bottom: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(20, 39, 29, 0.08);
+  border-radius: 36px;
+  padding: clamp(28px, 5vw, 56px);
+  background:
+    radial-gradient(circle at 76% 18%, rgba(216, 166, 81, 0.24), transparent 34%),
+    radial-gradient(circle at 8% 100%, rgba(122, 158, 136, 0.23), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(242, 238, 228, 0.82));
+  box-shadow: 0 36px 100px -70px rgba(20, 39, 29, 0.72);
+}
+
+.companion-simple-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto -10% -42% 36%;
+  height: 260px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.44);
+  filter: blur(4px);
+  transform: rotate(-6deg);
+}
+
+.companion-simple-hero-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+}
+
+.companion-simple-hero h1 {
+  max-width: 780px;
+  font-size: clamp(46px, 7.2vw, 92px);
+  line-height: 0.88;
+  letter-spacing: -0.055em;
+}
+
+.companion-simple-hero .lede {
+  max-width: 640px;
+  color: rgba(42, 53, 48, 0.82);
+  font-size: clamp(17px, 2vw, 22px);
+  line-height: 1.45;
+}
+
+.companion-simple-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.companion-simple-hero-actions button,
+.companion-simple-commandbar button {
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 220ms var(--ease-out), background 220ms var(--ease-out);
+}
+
+.companion-simple-hero-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(20, 39, 29, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--forest-800);
+  font-weight: 800;
+  box-shadow: 0 12px 32px -28px rgba(20, 39, 29, 0.58);
+}
+
+.companion-simple-hero-actions button:not(:disabled):hover,
+.companion-simple-commandbar button:hover,
+.companion-add-card:hover,
+.companion-icon-actions button:hover,
+.companion-plant-rows button:hover {
+  transform: translateY(-2px);
+  border-color: rgba(20, 39, 29, 0.22);
+  box-shadow: 0 24px 50px -34px rgba(20, 39, 29, 0.54);
+}
+
+.companion-simple-hero-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.companion-simple-orbit-card {
+  position: relative;
+  z-index: 1;
+  min-height: 360px;
+  overflow: hidden;
+  display: grid;
+  align-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 32px;
+  padding: 22px;
+  background:
+    linear-gradient(160deg, rgba(12, 26, 19, 0.93), rgba(28, 53, 39, 0.88)),
+    var(--forest-900);
+  color: var(--mist-25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 34px 70px -46px rgba(12, 26, 19, 0.9);
+}
+
+.companion-orbit-glow {
+  position: absolute;
+  inset: -28% -22% auto auto;
+  width: 270px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(216, 166, 81, 0.68), transparent 68%);
+  filter: blur(10px);
+}
+
+.companion-orbit-badge {
+  position: relative;
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.companion-orbit-ring {
+  position: relative;
+  justify-self: center;
+  width: min(230px, 64vw);
+  aspect-ratio: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.09) 0 48%, transparent 49%),
+    conic-gradient(from 210deg, var(--gold-500), rgba(122, 158, 136, 0.9), rgba(255, 255, 255, 0.16), var(--gold-500));
+  box-shadow: 0 0 0 18px rgba(255, 255, 255, 0.045), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.companion-orbit-ring::after {
+  content: "";
+  position: absolute;
+  inset: 15px;
+  border-radius: inherit;
+  background: linear-gradient(145deg, rgba(20, 39, 29, 0.98), rgba(45, 32, 24, 0.7));
+  z-index: 0;
+}
+
+.companion-orbit-ring span,
+.companion-orbit-ring small {
+  position: relative;
+  z-index: 1;
+}
+
+.companion-orbit-ring span {
+  font-size: clamp(52px, 8vw, 82px);
+  font-weight: 900;
+  line-height: 0.86;
+  letter-spacing: -0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.companion-orbit-ring small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.companion-orbit-list {
+  position: relative;
+  display: grid;
+  gap: 8px;
+}
+
+.companion-orbit-list span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.075);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.companion-garden-switcher,
+.companion-simple-tabs {
+  position: sticky;
+  top: 74px;
+  z-index: 6;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 18px;
+  border: 1px solid rgba(20, 39, 29, 0.08);
+  border-radius: 999px;
+  padding: 7px;
+  background: rgba(251, 250, 245, 0.76);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 55px -42px rgba(20, 39, 29, 0.55);
+}
+
+.companion-garden-switcher {
+  position: relative;
+  top: auto;
+}
+
+.companion-garden-switcher button,
+.companion-simple-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 10px 16px;
+}
+
+.companion-garden-switcher button.active,
+.companion-simple-tabs button.active {
+  background: linear-gradient(135deg, var(--forest-900), var(--forest-700));
+  box-shadow: 0 14px 28px -20px rgba(20, 39, 29, 0.84);
+}
+
+.companion-simple-stats {
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.companion-simple-stat {
+  position: relative;
+  min-height: 142px;
+  overflow: hidden;
+  align-content: end;
+  border-radius: 28px;
+  padding: 20px;
+}
+
+.companion-simple-stat::before {
+  content: "";
+  position: absolute;
+  inset: -35% -20% auto auto;
+  width: 150px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--stat-glow, rgba(122, 158, 136, 0.25));
+}
+
+.companion-simple-stat svg {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 38px;
+  height: 38px;
+  padding: 9px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--stat-color, var(--forest-800));
+  box-shadow: inset 0 0 0 1px rgba(20, 39, 29, 0.06);
+}
+
+.companion-simple-stat--leaf { --stat-color: #1f6b46; --stat-glow: rgba(31, 107, 70, 0.22); }
+.companion-simple-stat--sprout { --stat-color: #6b8f2a; --stat-glow: rgba(107, 143, 42, 0.22); }
+.companion-simple-stat--water { --stat-color: #2563a8; --stat-glow: rgba(37, 99, 168, 0.2); }
+.companion-simple-stat--gold { --stat-color: var(--gold-700); --stat-glow: rgba(216, 166, 81, 0.3); }
+
+.companion-simple-stat span,
+.companion-simple-stat strong {
+  position: relative;
+}
+
+.companion-simple-stat span {
+  color: rgba(90, 101, 94, 0.8);
+}
+
+.companion-simple-stat strong {
+  font-size: clamp(34px, 4.8vw, 52px);
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.companion-simple-commandbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.companion-simple-commandbar button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  min-height: 92px;
+  border: 1px solid var(--companion-border);
+  border-radius: 24px;
+  padding: 16px;
+  background: var(--companion-surface);
+  text-align: left;
+}
+
+.companion-simple-commandbar button > span {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  background: var(--forest-800);
+  color: #fff;
+}
+
+.companion-simple-commandbar strong {
+  color: var(--ink-900);
+  font-size: 15px;
+}
+
+.companion-simple-commandbar small {
+  color: var(--companion-muted);
+  font-size: 12px;
+}
+
+.companion-simple-commandbar button > svg {
+  grid-row: 1 / 3;
+  color: var(--ink-300);
+}
+
+.companion-simple-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  gap: 18px;
+}
+
+.companion-add-card,
+.companion-bed-card,
+.companion-zone-plants,
+.companion-water-zone,
+.companion-water-history,
+.companion-next-water,
+.companion-empty-state {
+  border-radius: 28px;
+}
+
+.companion-add-card {
+  min-height: 286px;
+  border-width: 1.5px;
+  border-color: rgba(20, 39, 29, 0.18);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(245, 242, 235, 0.52)),
+    repeating-linear-gradient(-45deg, rgba(20, 39, 29, 0.035) 0 1px, transparent 1px 12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+}
+
+.companion-add-card strong {
+  color: var(--ink-900);
+  font-size: 18px;
+}
+
+.companion-bed-card,
+.companion-zone-plants,
+.companion-water-zone {
+  gap: 18px;
+  min-height: 286px;
+}
+
+.companion-bed-card-head p,
+.companion-zone-plants header p,
+.companion-water-zone header p,
+.companion-next-water p {
+  color: var(--companion-muted);
+}
+
+.companion-icon-actions button {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.companion-bed-metrics span,
+.companion-plant-chips span,
+.companion-plant-chips em {
+  background: rgba(20, 39, 29, 0.055);
+  border: 1px solid rgba(20, 39, 29, 0.05);
+}
+
+.companion-card-actions {
+  margin-top: auto;
+}
+
+.companion-card-actions .inline-flex,
+.companion-card-actions button {
+  border-radius: 999px;
+}
+
+.companion-plant-list,
+.companion-water-zones,
+.companion-schedule-list,
+.companion-plant-rows {
+  gap: 14px;
+}
+
+.companion-plant-rows {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+}
+
+.companion-plant-rows button {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(122, 158, 136, 0.14), transparent 38%),
+    rgba(255, 255, 255, 0.72);
+}
+
+.companion-plant-rows button span {
+  font-weight: 850;
+}
+
+.companion-water-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(290px, 360px);
+  gap: 18px;
+}
+
+.companion-next-water {
+  position: relative;
+  overflow: hidden;
+  padding: 26px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(74, 144, 226, 0.28), transparent 30%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 246, 255, 0.82));
+}
+
+.companion-next-water h2 {
+  font-size: clamp(26px, 4vw, 44px);
+  letter-spacing: -0.04em;
+}
+
+.companion-water-history {
+  position: sticky;
+  top: 148px;
+}
+
+.companion-water-history div {
+  border-top: 0;
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(20, 39, 29, 0.04);
+}
+
+.companion-empty-state {
+  position: relative;
+  overflow: hidden;
+  min-height: 360px;
+  align-content: center;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(122, 158, 136, 0.22), transparent 36%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.companion-empty-state h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: -0.04em;
+}
+
+@media (max-width: 980px) {
+  .companion-simple-hero,
+  .companion-simple-commandbar,
+  .companion-water-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .companion-simple-tabs {
+    top: 62px;
+  }
+
+  .companion-water-history {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .companion-simple::before {
+    height: 420px;
+  }
+
+  .companion-simple-hero {
+    border-radius: 28px;
+    padding: 24px;
+  }
+
+  .companion-simple-hero h1 {
+    font-size: clamp(42px, 15vw, 68px);
+  }
+
+  .companion-simple-orbit-card {
+    min-height: 320px;
+  }
+
+  .companion-simple-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .companion-garden-switcher,
+  .companion-simple-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+
+  .companion-garden-switcher button,
+  .companion-simple-tabs button {
+    white-space: nowrap;
+  }
+
+  .companion-bed-card-head,
+  .companion-zone-plants header,
+  .companion-water-zone header {
+    display: grid;
+  }
+}
+
+@media (max-width: 520px) {
+  .companion-simple-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .companion-simple-commandbar button {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .companion-simple-commandbar button > svg {
+    display: none;
+  }
+}
