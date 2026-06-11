@@ -29,8 +29,10 @@
 
   --ink-900: #0c1a13;
   --ink-700: #2a3530;
+  --ink-600: #404b45;
   --ink-500: #5a655e;
   --ink-300: #9aa39d;
+  --ink-50:  #eef1ee;
 
   /* Type */
   --serif: "Tenor Sans", "Cormorant Garamond", Georgia, serif;
