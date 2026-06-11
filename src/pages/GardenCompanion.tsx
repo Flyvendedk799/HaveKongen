@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Camera, CloudSun, Droplets, GaugeCircle, Leaf, Pencil, Plus, Sparkles, Sprout, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -24,8 +24,11 @@ import PlantDetailSheet from "@/components/watering/PlantDetailSheet";
 import QuickWaterDialog from "@/components/watering/QuickWaterDialog";
 import ScheduleRow from "@/components/watering/ScheduleRow";
 import type { ZonePlant } from "@/components/watering/PlantChips";
+import type { CompanionGarden3DBed } from "@/components/companion/CompanionGarden3D";
 import "@/styles/watering.css";
 import "@/styles/companion.css";
+
+const CompanionGarden3D = lazy(() => import("@/components/companion/CompanionGarden3D"));
 
 type Garden = { id: string; name: string; latitude: number | null; longitude: number | null };
 type ZoneRow = Zone & { garden_id: string };
@@ -61,6 +64,7 @@ export default function GardenCompanion() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [forecasts, setForecasts] = useState<Forecast[]>([]);
   const [view, setView] = useState<View>(() => (localStorage.getItem("companion.simpleView") as View) || "beds");
+  const [heroBedId, setHeroBedId] = useState<string | null>(null);
 
   const [bedOpen, setBedOpen] = useState(false);
   const [editingBed, setEditingBed] = useState<BedDraft | undefined>();
@@ -142,6 +146,37 @@ export default function GardenCompanion() {
     }
     return next;
   }, [schedules, zones]);
+
+  const heroBeds = useMemo<CompanionGarden3DBed[]>(() => {
+    const timeForZone = (zoneId: string): string | null => {
+      let soonest: Date | null = null;
+      let time: string | null = null;
+      for (const schedule of schedules) {
+        if (schedule.zone_id !== zoneId || !schedule.enabled) continue;
+        const occ = upcomingOccurrences(schedule, 7)[0];
+        if (occ && (!soonest || occ.getTime() < soonest.getTime())) {
+          soonest = occ;
+          time = (schedule.start_time ?? "").slice(0, 5) || null;
+        }
+      }
+      return time;
+    };
+
+    return zones.map((zone) => ({
+      id: zone.id,
+      name: zone.name,
+      areaM2: zone.area_m2 ?? 0,
+      sun: (zone.sun_exposure ?? "sun") as CompanionGarden3DBed["sun"],
+      soil: (zone.soil ?? "loam") as CompanionGarden3DBed["soil"],
+      plants: (plantsByZone[zone.id] ?? []).map((plant) => ({
+        id: plant.id,
+        name: plantName(plant),
+        waterNeed: (plant.water_need === "low" || plant.water_need === "high" ? plant.water_need : "medium") as CompanionGarden3DBed["plants"][number]["waterNeed"],
+        qty: plant.qty,
+      })),
+      nextWatering: timeForZone(zone.id),
+    }));
+  }, [zones, plantsByZone, schedules]);
 
   async function saveBed(bed: BedDraft) {
     if (!user || !garden) return;
@@ -347,6 +382,20 @@ export default function GardenCompanion() {
           </section>
         ) : (
           <>
+            {zones.length > 0 && (
+              <section className="companion-3d-section" aria-label="Have-overblik i 3D">
+                <Suspense fallback={<div className="companion-3d-skeleton" aria-hidden="true" />}>
+                  <CompanionGarden3D
+                    beds={heroBeds}
+                    mode={view}
+                    selectedBedId={heroBedId}
+                    onModeChange={(next) => switchView(next)}
+                    onSelectBed={setHeroBedId}
+                  />
+                </Suspense>
+              </section>
+            )}
+
             <section className="companion-simple-stats" aria-label="Havekompagnon overblik">
               <Stat icon={<Leaf size={18} />} label="Bede" value={zones.length} tone="leaf" />
               <Stat icon={<Sprout size={18} />} label="Planter" value={allPlants.reduce((sum, plant) => sum + plant.qty, 0)} tone="sprout" />

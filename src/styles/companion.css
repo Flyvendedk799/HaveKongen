@@ -2146,6 +2146,16 @@
   padding-bottom: 56px;
 }
 
+/* Interactive 3D garden hero module. */
+.companion-3d-section {
+  margin: 4px 0 22px;
+}
+
+.companion-3d-section .companion-3d,
+.companion-3d-section .companion-3d-skeleton {
+  max-width: 960px;
+}
+
 .companion-simple-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);

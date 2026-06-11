@@ -1,0 +1,274 @@
+/* Scoped styles for the embeddable Havekompagnon garden diorama.
+   Everything lives under .companion-3d — no global resets. */
+
+.companion-3d {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: 20px;
+  overflow: hidden;
+  background: #f3ebd9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 4px 32px rgba(55, 35, 12, 0.13), 0 0 0 1px rgba(55, 35, 12, 0.05);
+}
+
+.companion-3d-canvas {
+  display: block;
+  width: 100%;
+  height: 440px;
+  cursor: default;
+  touch-action: pan-y;
+}
+
+/* Brand badge */
+.companion-3d-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 10px;
+  padding: 5px 11px;
+  pointer-events: none;
+  z-index: 10;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+}
+
+.companion-3d-badge span {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e3a14;
+  letter-spacing: 0.4px;
+}
+
+/* Mode tabs */
+.companion-3d-tabs {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 16px rgba(55, 35, 12, 0.12);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.companion-3d-tab {
+  border: none;
+  border-radius: 100px;
+  padding: 7px 17px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 500;
+  background: transparent;
+  color: #3a3826;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.companion-3d-tab:hover {
+  color: #1a3a12;
+}
+
+.companion-3d-tab.is-active {
+  background: #264f1a;
+  color: #fff;
+  font-weight: 700;
+}
+
+.companion-3d-tab:focus-visible {
+  outline: 2px solid #3aad5c;
+  outline-offset: 2px;
+}
+
+/* Info bar */
+.companion-3d-infobar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 14px 22px 18px;
+  background: linear-gradient(to top, rgba(243, 235, 217, 0.98) 52%, rgba(243, 235, 217, 0));
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+}
+
+.companion-3d-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.companion-3d-row--plants {
+  gap: 8px;
+}
+
+.companion-3d-bedname {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a3a12;
+  letter-spacing: -0.2px;
+}
+
+.companion-3d-pill {
+  font-size: 12px;
+  color: #7a6e58;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  padding: 2px 9px;
+}
+
+.companion-3d-meta {
+  font-size: 12px;
+  color: #7a6e58;
+}
+
+.companion-3d-meta strong {
+  color: #3a5a18;
+  font-weight: 600;
+}
+
+.companion-3d-plantchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(180, 168, 145, 0.4);
+  border-radius: 100px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+
+.companion-3d-plantchip b {
+  font-weight: 600;
+  color: #254a18;
+}
+
+.companion-3d-plantchip span {
+  color: #8a806a;
+}
+
+.companion-3d-waterrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.companion-3d-waterdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4aade8;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(74, 173, 232, 0.22);
+}
+
+.companion-3d-waterstatus {
+  font-size: 13px;
+  font-weight: 500;
+  color: #18283a;
+}
+
+/* Loading skeleton */
+.companion-3d-skeleton {
+  position: relative;
+  width: 100%;
+  height: 440px;
+  margin: 0 auto;
+  border-radius: 20px;
+  overflow: hidden;
+  background: linear-gradient(110deg, #f3ebd9 30%, #efe6d0 50%, #f3ebd9 70%);
+  background-size: 200% 100%;
+  animation: companion-3d-shimmer 1.4s ease infinite;
+  box-shadow: 0 4px 32px rgba(55, 35, 12, 0.1), 0 0 0 1px rgba(55, 35, 12, 0.05);
+}
+
+@keyframes companion-3d-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Static, no-canvas fallback */
+.companion-3d-fallback {
+  display: grid;
+  gap: 14px;
+  padding: 26px;
+  min-height: 320px;
+  align-content: center;
+  background:
+    radial-gradient(circle at 30% 0%, rgba(122, 158, 136, 0.18), transparent 40%),
+    linear-gradient(135deg, #f6efe0, #ede1cc);
+}
+
+.companion-3d-fallback h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #1a3a12;
+}
+
+.companion-3d-fallback-beds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.companion-3d-fallback-bed {
+  border: 1px solid rgba(120, 84, 51, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 12px 14px;
+}
+
+.companion-3d-fallback-bed.is-active {
+  border-color: #3aad5c;
+  box-shadow: inset 0 0 0 1px #3aad5c;
+}
+
+.companion-3d-fallback-bed strong {
+  display: block;
+  color: #1a3a12;
+  font-size: 14px;
+}
+
+.companion-3d-fallback-bed small {
+  color: #7a6e58;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .companion-3d-canvas,
+  .companion-3d-skeleton {
+    height: 348px;
+  }
+
+  .companion-3d-tabs {
+    top: 14px;
+  }
+
+  .companion-3d-tab {
+    padding: 6px 13px;
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .companion-3d *,
+  .companion-3d-skeleton {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
