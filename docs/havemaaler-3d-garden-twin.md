@@ -1,5 +1,32 @@
 # Havemåler 3D Garden Twin Implementation Contract
 
+## Update (2026-06-18): Part 2 is now the in-browser 3D builder
+
+Havemåler Part 1 (draw the lawn outline on the satellite ortofoto and save) is unchanged.
+
+**Part 2 is no longer a phone-camera scan.** It is an in-browser, satellite-first 3D
+builder at `/havemaaler/3d?garden=<id>` (`src/pages/GardenTwinBuilder.tsx`). It produces
+the same `gardens.depth_model` contract described below, but via:
+
+1. **Denmark's national elevation model (DHM)** for real ground slope/relief and to
+   pre-fill object heights — terrain `dhm_terraen` (DTM) and surface `dhm_overflade`
+   (DSM); `DSM − DTM` is object height. Fetched by the `get-elevation` edge function
+   (Dataforsyningen WCS `dhm_wcs_DAF`, same `DATAFORSYNINGEN_TOKEN`). Helpers in
+   `src/lib/gardenElevation.ts`. Everything degrades gracefully to flat terrain.
+2. **Interactive object placement** (trees, hedges, sheds, terraces, beds, fences,
+   water…) with editable heights — `src/lib/gardenBuilder.ts`.
+
+The built model uses `alignment.mode = "elevation-model"`, object `source =
+"elevation_model"` (DHM-measured) or `"manual"`, and `terrain.elevation` holds the
+DHM grid. See `buildGardenTwinModel` in `src/lib/gardenDepth.ts`.
+
+The phone-scan pipeline documented below (`garden_scan_sessions`, the scan edge
+functions, `GardenMobileScan.tsx`) is **dormant**, not deleted. The DB tables,
+`scan-anchored` alignment mode, and manifest contract remain valid for any future
+camera-based capture, but are not part of the current user flow.
+
+---
+
 ## Runtime Shape
 
 Havemåler is satellite-first. The web app owns garden identity, lawn polygons, exclusions, ortofoto context, and the persisted `gardens.depth_model`. Mobile web capture and backend reconstruction are producers of better evidence for that same depth model. The default user flow must work in the browser without App Store installation.

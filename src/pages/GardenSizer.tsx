@@ -26,7 +26,7 @@ import {
 import { logHavemaalerSegmentationEvent } from "@/lib/lawnSegmentation/telemetry";
 import PinpointSequence from "@/components/havemaaler/PinpointSequence";
 import GardenTwinViewer from "@/components/havemaaler/GardenTwinViewer";
-import GardenScanPanel from "@/components/havemaaler/GardenScanPanel";
+import GardenBuilderHandoff from "@/components/havemaaler/GardenBuilderPanel";
 import {
   coerceGardenDepthModel,
   depthModelToJson,
@@ -885,14 +885,14 @@ export default function GardenSizer() {
   const canStartNewScan = scanCanStartNewSession(scanSessions);
   const canStartScanFromGeometry = Boolean(generatedDepthModel) && !saving && !startingScan;
   const scanActionLabel = startingScan || saving
-    ? "Klargør scan..."
+    ? "Klargør…"
     : !generatedDepthModel
       ? "Tegn plæne først"
-      : canStartNewScan
-        ? (editingGarden?.id ? "Scan haven i 3D" : "Gem & scan haven")
-        : "Fortsæt 3D-scan";
-  const scanPanelButtonLabel = !generatedDepthModel ? "Tegn først" : !editingGarden?.id ? "Gem & scan" : undefined;
-  const saveLaterLabel = editingGarden?.id ? "Gem måling" : "Scan senere";
+      : editingGarden?.id
+        ? "Byg 3D-have"
+        : "Gem & byg 3D-have";
+  const scanPanelButtonLabel = !generatedDepthModel ? "Tegn først" : !editingGarden?.id ? "Gem & byg" : undefined;
+  const saveLaterLabel = editingGarden?.id ? "Gem måling" : "Gem til senere";
 
   function requireLoginForHavemaaler(message: string) {
     toast(message);
@@ -1162,6 +1162,28 @@ export default function GardenSizer() {
       description: result.softWarnings.length ? result.softWarnings.join(" ") : undefined,
     });
     return result.garden;
+  }
+
+  // Havemåler Part 2 is now the in-browser 3D builder (DHM elevation + objects),
+  // not a phone scan. Save the measurement, then hand off to the builder.
+  async function startTwinBuilder() {
+    if (startingScan || saving) return;
+    if (!generatedDepthModel) {
+      toast("Tegn en lukket græsflade først");
+      return;
+    }
+    if (!user) {
+      requireLoginForHavemaaler("Log ind for at bygge 3D-haven");
+      return;
+    }
+    setStartingScan(true);
+    const result = await persistMeasurement({ includeThumbnail: true });
+    setStartingScan(false);
+    if (!result?.garden.id) return;
+    toast.success("Have gemt. Åbner 3D-byggeren…", {
+      description: result.softWarnings.length ? result.softWarnings.join(" ") : undefined,
+    });
+    navigate(`/havemaaler/3d?garden=${result.garden.id}`);
   }
 
   async function startGardenScan() {
@@ -1944,7 +1966,7 @@ export default function GardenSizer() {
                   <div className="help" style={{ zIndex: 2 }}>
                     <span className="dot"></span>
                     <span>
-                      {mapView === "twin" ? "Flad 3D-preview fra 2D-kortet. Start mobilscan for rigtige kamera-keyframes, ankre og senere højde/forhindringer."
+                      {mapView === "twin" ? "Flad 3D-preview fra 2D-kortet. Byg 3D-haven for rigtige højder, terrænfald og objekter fra Danmarks Højdemodel."
                         : mode === "wand" ? (wandLoading ? wandStage : wandPreview ? (
                           wandReviewMode === "add" ? "Klik på græs der mangler"
                             : wandReviewMode === "remove" ? "Klik på område der skal væk"
@@ -1998,8 +2020,8 @@ export default function GardenSizer() {
                   <>
                   <div className="tools measurement-tools" style={{ zIndex: 2, flexWrap: "wrap" }}>
                     {mainClosed && (
-                      <button className="tool-btn scan-primary mobile-scan-tool" onClick={startGardenScan} disabled={!canStartScanFromGeometry} title="Start mobilscan">
-                        {startingScan || saving ? "Klargør..." : editingGarden?.id ? "Scan 3D" : "Gem & scan"}
+                      <button className="tool-btn scan-primary mobile-scan-tool" onClick={startTwinBuilder} disabled={!canStartScanFromGeometry} title="Byg 3D-have">
+                        {startingScan || saving ? "Klargør…" : editingGarden?.id ? "Byg 3D" : "Gem & byg"}
                       </button>
                     )}
 	                    <button className={`tool-btn ${mode === "draw" ? "is-active" : ""}`} onClick={() => { clearWandPreview(); setMode("draw"); }} title="Tegn græszone (1)">{mainClosed ? "+ Græszone" : "Tegn"}</button>
@@ -2028,7 +2050,7 @@ export default function GardenSizer() {
                 </div>
 
                 <div className="map-primary-actions">
-                  <button className="tool-btn scan-primary" onClick={startGardenScan} disabled={!canStartScanFromGeometry}>
+                  <button className="tool-btn scan-primary" onClick={startTwinBuilder} disabled={!canStartScanFromGeometry}>
                     {scanActionLabel}
                   </button>
                   <button className="tool-btn" onClick={saveGarden} disabled={saving || area === 0}>
@@ -2096,17 +2118,15 @@ export default function GardenSizer() {
                   <div className="cell"><div className="v">{tier.noise}</div><div className="l">Lydniveau</div></div>
                 </div>
 
-                <GardenScanPanel
+                <GardenBuilderHandoff
                   depthModel={activeDepthModel}
-                  sessions={scanSessions}
-                  scanLaunch={scanLaunch}
                   starting={startingScan || saving}
                   canPreview={Boolean(generatedDepthModel)}
-                  canStartScan={canStartScanFromGeometry}
-                  scanButtonLabel={scanPanelButtonLabel}
+                  canStartBuild={canStartScanFromGeometry}
+                  buildButtonLabel={scanActionLabel}
                   saveLaterLabel={saveLaterLabel}
                   onBuildPreview={refreshDepthPreview}
-                  onStartScan={startGardenScan}
+                  onStartBuild={startTwinBuilder}
                   onSaveLater={saveGarden}
                   onShowTwin={() => { if (!activeDepthModel) refreshDepthPreview(); else setMapView("twin"); }}
                   canSaveLater={area > 0 && !saving}

@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.get-matrikel]
 verify_jwt = false
 
+[functions.get-elevation]
+verify_jwt = false
+
 [functions.segment-lawn]
 verify_jwt = false
 

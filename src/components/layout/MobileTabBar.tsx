@@ -80,7 +80,9 @@ const items = [
 export function MobileTabBar() {
   const { pathname } = useLocation();
   const isHome = pathname === "/";
-  const isImmersive = pathname.startsWith("/havemaaler/scan");
+  // The 3D builder (/havemaaler/3d, legacy /havemaaler/scan) is a normal page,
+  // so the tab bar stays visible — no immersive full-screen camera capture anymore.
+  const isImmersive = false;
   const [visible, setVisible] = useState(!isHome);
   const cartCount = useCart((s) => s.count());
   const openCart = useCart((s) => s.openCart);

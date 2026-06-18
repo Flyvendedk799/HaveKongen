@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
 import {
   Droplets, Leaf, Sun, CloudRain, Sparkles, CheckCircle2, Calendar,
-  ShoppingBag, Ruler, MessageSquare, ArrowRight, AlertTriangle, ListTodo,
+  ShoppingBag, Ruler, MessageSquare, ArrowRight, AlertTriangle, ListTodo, Layers3,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -335,6 +335,7 @@ export default function MinHave() {
                 <Shortcut to="/havekompagnon" icon={<Droplets />} title="Havekompagnon" sub="Kort, scan og smart vanding" />
                 <Shortcut to="/ai" icon={<MessageSquare />} title="Plantepleje AI" sub="Diagnose & rådgivning" />
                 <Shortcut to={editMeasurementPath(activeGarden.id)} icon={<Ruler />} title="Havemåler" sub="Mål bede, plæne, terrasse" />
+                <Shortcut to={`/havemaaler/3d?garden=${activeGarden.id}`} icon={<Layers3 />} title="Byg 3D-have" sub="Højder, terræn & objekter" />
                 <Shortcut to="/webshop" icon={<ShoppingBag />} title="Webshop" sub="Frø, gødning, redskaber" />
               </div>
             </div>

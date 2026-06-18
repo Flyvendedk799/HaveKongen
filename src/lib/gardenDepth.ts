@@ -21,8 +21,22 @@ export type DepthSource =
   | "satellite"
   | "user_scan"
   | "ai_reconstruction"
+  | "elevation_model"
   | "manual"
   | "fallback";
+
+export type GardenElevationSummary = {
+  source: "dhm";
+  cols: number;
+  rows: number;
+  // [minLng, minLat, maxLng, maxLat]; grid row 0 = north (maxLat).
+  bbox: [number, number, number, number];
+  // Absolute terrain heights (m above sea level), rows x cols.
+  terrain: number[][];
+  stats: { minM: number; maxM: number; meanM: number; reliefM: number };
+  resolutionM: number;
+  confidence: number;
+};
 
 export type LocalPoint = { x: number; z: number };
 
@@ -93,7 +107,7 @@ export type GardenDepthModel = {
   center: LngLat;
   units: "meters";
   alignment: {
-    mode: "satellite-only" | "scan-anchored" | "manual";
+    mode: "satellite-only" | "scan-anchored" | "elevation-model" | "manual";
     anchorCount: number;
     routePoseCount?: number | null;
     routePoseSpreadM?: number | null;
@@ -130,6 +144,7 @@ export type GardenDepthModel = {
     slopeHint: "flat" | "gentle" | "unknown";
     elevationConfidence: number;
     unknownRegions: Ring[];
+    elevation?: GardenElevationSummary | null;
   };
   objects: GardenDepthObject[];
   warnings: string[];
@@ -247,8 +262,14 @@ export function inspectGardenDepthModel(value: unknown): { model: GardenDepthMod
   if (model.objects.some((object) => object.heightRangeM && object.heightRangeM[0] > object.heightRangeM[1])) {
     issues.push({ severity: "error", code: "invalid_height_range", message: "Et objekt har omvendt højdeinterval." });
   }
-  if (model.alignment.mode !== "scan-anchored" && model.quality.grade === "strong") {
-    issues.push({ severity: "warning", code: "strong_quality_requires_scan", message: "Strong kvalitet bør kræve scan-anchored alignment." });
+  if (model.alignment.mode !== "scan-anchored" && model.alignment.mode !== "elevation-model" && model.quality.grade === "strong") {
+    issues.push({ severity: "warning", code: "strong_quality_requires_scan", message: "Strong kvalitet bør kræve scan-anchored eller højdemodel-alignment." });
+  }
+  if (model.terrain.elevation) {
+    const elevation = model.terrain.elevation;
+    if (!Array.isArray(elevation.terrain) || elevation.terrain.length !== elevation.rows) {
+      issues.push({ severity: "warning", code: "elevation_grid_mismatch", message: "Højdegitterets rækker matcher ikke metadata." });
+    }
   }
   if (model.alignment.mode === "scan-anchored" && model.alignment.anchorCount < 2 && (model.alignment.routePoseCount ?? 0) < 4) {
     issues.push({ severity: "error", code: "scan_alignment_requires_anchors_or_route_poses", message: "Scan-alignment kræver mindst 2 ankre eller 4 route-poser." });
@@ -285,6 +306,7 @@ export function depthPipelineStage(model: GardenDepthModel | null) {
   if (!model) return "missing_2d_geometry";
   if (model.alignment.mode === "scan-anchored" && model.quality.grade === "strong") return "scan_verified";
   if (model.alignment.mode === "scan-anchored") return "scan_needs_review";
+  if (model.alignment.mode === "elevation-model") return "elevation_built";
   if (model.terrain.lawnRings.length > 0) return "satellite_preview";
   return "outline_only";
 }
@@ -292,6 +314,7 @@ export function depthPipelineStage(model: GardenDepthModel | null) {
 export function depthPipelineStageLabel(stage: ReturnType<typeof depthPipelineStage>) {
   if (stage === "scan_verified") return "Scan-verificeret";
   if (stage === "scan_needs_review") return "Scan kræver tjek";
+  if (stage === "elevation_built") return "3D-have bygget";
   if (stage === "satellite_preview") return "Flad kort-preview";
   if (stage === "outline_only") return "Kun havegrænse";
   return "Mangler geometri";
@@ -399,6 +422,197 @@ export function generateGardenDepthModel(input: GenerateDepthModelInput): Garden
       derivedGeometryStored: true,
       rawMediaUserDeletable: true,
     },
+  };
+}
+
+export type GardenObjectInput = {
+  type: DepthObjectType;
+  label: string;
+  footprint: Ring;
+  heightM: number;
+  confidence: number;
+  source: DepthSource;
+  notes?: string;
+};
+
+type BuildTwinInput = {
+  gardenId?: string | null;
+  name?: string | null;
+  center?: LngLat | null;
+  lawnRings: Ring[];
+  exclusions?: Ring[];
+  matrikel?: Ring | null;
+  areaM2?: number | null;
+  elevation?: GardenElevationSummary | null;
+  objects: GardenObjectInput[];
+  generatedAt?: string;
+};
+
+/**
+ * Build the full garden twin for Havemåler Part 2: real terrain from the DHM
+ * elevation model (when available) plus objects the user placed and height-set
+ * in the 3D builder. Output is the same GardenDepthModel contract Part 1 writes,
+ * so Havekompagnon/watering/wildlife keep reading it — just richer and aligned
+ * with `elevation-model` mode under truthful confidence.
+ */
+export function buildGardenTwinModel(input: BuildTwinInput): GardenDepthModel | null {
+  const lawnRings = input.lawnRings.filter((ring) => ring.length >= 3);
+  if (!lawnRings.length) return null;
+
+  const boundary = input.matrikel && input.matrikel.length >= 3 ? input.matrikel : lawnRings[0];
+  const center = input.center ?? centerFromRings([boundary, ...lawnRings]) ?? boundary[0];
+  const areaM2 = input.areaM2 ?? safeArea(lawnRings);
+  // Normalize to a lean summary (drop any extra fields like the DSM surface grid)
+  // so the saved depth_model stays compact.
+  const elevation: GardenElevationSummary | null = input.elevation
+    ? {
+        source: "dhm",
+        cols: input.elevation.cols,
+        rows: input.elevation.rows,
+        bbox: input.elevation.bbox,
+        terrain: input.elevation.terrain,
+        stats: input.elevation.stats,
+        resolutionM: input.elevation.resolutionM,
+        confidence: input.elevation.confidence,
+      }
+    : null;
+
+  const builtObjects: GardenDepthObject[] = input.objects
+    .filter((object) => object.footprint.length >= 3)
+    .map((object, index) => {
+      const confidence = clamp01(object.confidence);
+      return {
+        id: `built-${object.type}-${index + 1}`,
+        type: object.type,
+        label: object.label,
+        footprint: object.footprint,
+        localFootprint: object.footprint.map((point) => lngLatToLocal(point, center)),
+        areaM2: safeArea([object.footprint]),
+        dimensionsM: dimensionsForRing(object.footprint, center),
+        heightM: Number(object.heightM.toFixed(2)),
+        heightRangeM: heightRangeForConfidence(object.heightM, confidence),
+        confidence,
+        source: object.source,
+        notes: object.notes,
+      };
+    });
+
+  const objects = [...builtObjects, ...exclusionObjects(input.exclusions ?? [], center)];
+
+  const reliefM = elevation?.stats.reliefM ?? 0;
+  const slopeHint: GardenDepthModel["terrain"]["slopeHint"] = elevation
+    ? (reliefM < 0.25 ? "flat" : "gentle")
+    : "unknown";
+  const elevationConfidence = elevation?.confidence ?? 0.25;
+  const verifiedObjects = builtObjects.filter((object) => object.confidence >= 0.7).length;
+  const quality = qualityForBuiltModel({
+    objectCount: builtObjects.length,
+    verifiedObjects,
+    hasElevation: Boolean(elevation),
+    reliefM,
+    hasMatrikel: Boolean(input.matrikel?.length),
+  });
+  const alignmentConfidence = elevation ? Math.min(0.9, 0.6 + elevationConfidence * 0.3) : 0.55;
+
+  const warnings = [
+    elevation ? "terrain_from_dhm_elevation" : "elevation_unavailable_flat_terrain",
+    ...(builtObjects.some((object) => object.source === "elevation_model") ? ["object_heights_partly_from_dhm"] : []),
+    ...(builtObjects.length ? [] : ["no_objects_placed"]),
+  ];
+
+  return {
+    version: 1,
+    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    gardenId: input.gardenId ?? null,
+    name: input.name ?? null,
+    center,
+    units: "meters",
+    alignment: {
+      mode: "elevation-model",
+      anchorCount: 0,
+      residualM: null,
+      confidence: alignmentConfidence,
+      notes: elevation
+        ? `Terræn fra Danmarks Højdemodel (DHM) med ${reliefM.toFixed(2)} m relief. Objekter placeret og højdesat i 3D-byggeren.`
+        : "Fladt terræn (ingen højdedata for adressen). Objekter placeret manuelt i 3D-byggeren.",
+    },
+    quality,
+    twin: baseTwinContract({
+      status: "evidence_ready",
+      updatedBy: "manual_review",
+      modelName: elevation ? "havemaaler-3d-builder-dhm" : "havemaaler-3d-builder",
+      modelVersion: "garden-twin-v1",
+      provider: "havekongen",
+      license: "commercial-approved",
+      commercialUseApproved: true,
+      evidence: {
+        ortofoto: true,
+        cadastralBoundary: Boolean(input.matrikel?.length),
+        manualGeometry: true,
+        mobileScan: false,
+        coverageScore: elevation ? elevation.confidence : null,
+        warnings,
+      },
+    }),
+    captureReadiness: {
+      minimumAnchors: 2,
+      recommendedAnchors: 4,
+      recommendedSeconds: [45, 90],
+      anchorSuggestions: anchorSuggestionsForBoundary(boundary, center),
+    },
+    terrain: {
+      boundary,
+      localBoundary: boundary.map((point) => lngLatToLocal(point, center)),
+      lawnRings,
+      localLawnRings: lawnRings.map((ring) => ring.map((point) => lngLatToLocal(point, center))),
+      areaM2,
+      slopeHint,
+      elevationConfidence,
+      unknownRegions: [],
+      elevation,
+    },
+    objects,
+    warnings,
+    privacy: {
+      rawMediaRetentionDays: 14,
+      derivedGeometryStored: true,
+      rawMediaUserDeletable: true,
+    },
+  };
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function heightRangeForConfidence(heightM: number, confidence: number): [number, number] {
+  const spread = Math.max(0.1, heightM * (1 - confidence) * 0.6);
+  return [Number(Math.max(0, heightM - spread).toFixed(2)), Number((heightM + spread).toFixed(2))];
+}
+
+function qualityForBuiltModel(input: { objectCount: number; verifiedObjects: number; hasElevation: boolean; reliefM: number; hasMatrikel: boolean }): GardenDepthModel["quality"] {
+  let score = 48;
+  const reasons: string[] = ["Objekter placeret og højdesat i 3D-byggeren."];
+  if (input.hasElevation) {
+    score += 22;
+    reasons.push("Terræn og objekt-højder understøttet af Danmarks Højdemodel.");
+    if (input.reliefM >= 0.25) {
+      score += 4;
+      reasons.push(`Reelt terrænfald på ${input.reliefM.toFixed(1)} m i haven.`);
+    }
+  } else {
+    reasons.push("Fladt terræn — ingen højdedata for adressen.");
+  }
+  if (input.hasMatrikel) score += 4;
+  if (input.objectCount >= 3) score += 6;
+  if (input.verifiedObjects >= 3) score += 8;
+  const finalScore = Math.min(100, score);
+  const grade = finalScore >= 76 ? "strong" : finalScore >= 52 ? "usable" : "draft";
+  return {
+    score: finalScore,
+    grade,
+    reasons,
+    nextBestAction: grade === "strong" ? "ready" : "review_objects",
   };
 }
 
