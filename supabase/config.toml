@@ -29,3 +29,27 @@ verify_jwt = false
 
 [functions.plant-diagnose]
 verify_jwt = false
+
+# --- Local self-hosted (ServerHoster) Supabase ports ---
+# Cloud ignores these; they only apply to a local `supabase start`. Defaults
+# (543xx) collide with an ssh tunnel on this host, so we use a free 554xx range.
+# analytics is disabled because its vector container can't mount the docker
+# socket under Colima.
+[api]
+port = 55421
+
+[db]
+port = 55422
+shadow_port = 55420
+
+[db.pooler]
+port = 55429
+
+[studio]
+port = 55423
+
+[inbucket]
+port = 55424
+
+[analytics]
+enabled = false

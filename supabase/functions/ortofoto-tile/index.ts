@@ -1,3 +1,5 @@
+import { rawHttpsGet } from "../_shared/rawHttps.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -41,19 +43,6 @@ function tileSize(value: string | null): number {
   return Math.max(128, Math.min(512, n));
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: "image/jpeg", "Accept-Encoding": "identity" },
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -73,11 +62,12 @@ Deno.serve(async (req: Request) => {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const upstream = await fetchWithTimeout(wms, 4500);
-      if (!upstream.ok) continue;
-      const bytes = await upstream.arrayBuffer();
-      if (bytes.byteLength < 100) continue;
-      return new Response(bytes, { headers: TILE_HEADERS });
+      const upstream = await rawHttpsGet(wms, 4500, { Accept: "image/jpeg" });
+      if (!upstream || upstream.status !== 200) continue;
+      if (upstream.body.byteLength < 100) continue;
+      // Guard against an XML ServiceException slipping through as a "tile".
+      if (upstream.contentType.includes("xml")) continue;
+      return new Response(upstream.body, { headers: TILE_HEADERS });
     } catch (e) {
       console.warn("ortofoto tile failed", String(e));
     }

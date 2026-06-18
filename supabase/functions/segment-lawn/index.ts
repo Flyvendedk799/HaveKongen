@@ -7,6 +7,8 @@
 //  - Optional `excludePolygons` returned: model can flag flowerbeds/decks inside lawn
 //  - Smooths out near-duplicate vertices server-side
 
+import { rawHttpsGet } from "../_shared/rawHttps.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -398,31 +400,21 @@ function candidateFromParsed(
   };
 }
 
-async function fetchImageWithTimeout(url: string, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { "Accept-Encoding": "identity", Accept: "image/jpeg,image/png" },
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function fetchImageBytes(url: string, attempts = 2, timeoutMs = 6500): Promise<Uint8Array> {
   let last = "";
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const response = await fetchImageWithTimeout(url, timeoutMs);
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        last = `HTTP ${response.status}: ${text.slice(0, 180)}`;
+      // Raw TLS GET (handles the Dataforsyningen gateway's unclean TLS close).
+      const response = await rawHttpsGet(url, timeoutMs, { Accept: "image/jpeg,image/png" });
+      if (!response || response.status !== 200) {
+        last = `HTTP ${response?.status ?? "no-response"}`;
         continue;
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > 100) return bytes;
+      if (response.contentType.includes("xml")) {
+        last = "service exception";
+        continue;
+      }
+      if (response.body.byteLength > 100) return response.body;
       last = "empty image response";
     } catch (e) {
       last = String(e);

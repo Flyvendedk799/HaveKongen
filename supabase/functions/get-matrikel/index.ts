@@ -1,3 +1,5 @@
+import { rawHttpsGet, decodeText } from "../_shared/rawHttps.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -15,25 +17,11 @@ function emptyFeatureCollection(detail?: string) {
 }
 
 async function fetchTextWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: "application/geo+json, application/json" },
-    });
-    let text = "";
-    try {
-      text = await response.text();
-    } catch (e) {
-      return { ok: false, status: response.status, text: "", err: String(e) };
-    }
-    return { ok: response.ok, status: response.status, text, err: "" };
-  } catch (e) {
-    return { ok: false, status: 0, text: "", err: String(e) };
-  } finally {
-    clearTimeout(timeout);
-  }
+  // Raw TLS GET: the Dataforsyningen gateway closes chunked connections without
+  // close_notify, which Deno's fetch rejects ("unexpected end of file").
+  const res = await rawHttpsGet(url, timeoutMs, { Accept: "application/geo+json, application/json" });
+  if (!res) return { ok: false, status: 0, text: "", err: "request failed" };
+  return { ok: res.status >= 200 && res.status < 300, status: res.status, text: decodeText(res.body), err: "" };
 }
 
 Deno.serve(async (req: Request) => {
