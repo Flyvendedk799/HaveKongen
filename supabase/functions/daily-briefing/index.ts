@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
         .eq("garden_id", garden?.id ?? "00000000-0000-0000-0000-000000000000"),
     ]);
 
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) return json({ error: "AI ikke konfigureret" }, 500);
 
     const ctx = {
@@ -91,11 +91,11 @@ Deno.serve(async (req) => {
       })),
     };
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: "Du er en venlig dansk have-coach. Lav en kort morgen-briefing på dansk. Vær konkret, rolig og praktisk. Brug have-data nøjagtigt." },
           { role: "user", content: `Lav dagens briefing baseret på denne kontekst:\n${JSON.stringify(ctx)}` },

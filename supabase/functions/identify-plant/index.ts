@@ -13,8 +13,8 @@ Deno.serve(async (req) => {
     if (!image || typeof image !== "string") {
       return json({ error: "image (data URL or http URL) is required" }, 400);
     }
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) return json({ error: "LOVABLE_API_KEY not configured" }, 500);
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) return json({ error: "OPENAI_API_KEY not configured" }, 500);
 
     const catalogRows = Array.isArray(catalog)
       ? catalog as { slug: string; name_da: string; latin?: string | null }[]
@@ -23,11 +23,11 @@ Deno.serve(async (req) => {
       ? `\n\nIf one of these slugs match, prefer it:\n${catalogRows.slice(0, 200).map((c) => `- ${c.slug}: ${c.name_da}${c.latin ? " (" + c.latin + ")" : ""}`).join("\n")}`
       : "";
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",

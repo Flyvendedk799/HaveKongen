@@ -41,8 +41,8 @@ serve(async (req) => {
       })),
     } : null;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
 
     const month = new Date().toLocaleString("da-DK", { month: "long" });
 
@@ -66,7 +66,7 @@ Zoner:
 ${zones.map((z) => `- ${z.id} · ${z.name} · type=${z.type} · ${z.area_m2 ?? "?"} m² · sol=${z.sun_exposure ?? "?"} · jord=${z.soil ?? "?"}${z.plants?.length ? ` · planter: ${z.plants.map(p => `${p.name}(${p.water_need ?? "med"})`).join(", ")}` : ""}`).join("\n")}`;
 
     const aiBody = {
-      model: "google/gemini-3-flash-preview",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: sysPrompt },
         { role: "user", content: userPrompt },
@@ -115,9 +115,9 @@ ${zones.map((z) => `- ${z.id} · ${z.name} · type=${z.type} · ${z.area_m2 ?? "
       tool_choice: { type: "function", function: { name: "set_watering_plan" } },
     };
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiResp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify(aiBody),
     });
 
