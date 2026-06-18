@@ -8,7 +8,9 @@
 // authed with the same DATAFORSYNINGEN_TOKEN already used for ortofoto/matrikel.
 // Everything degrades gracefully: any failure returns { available: false } and
 // the builder falls back to a flat terrain with fully manual heights.
-import { fromArrayBuffer } from "https://esm.sh/geotiff@2.1.3";
+// No external GeoTIFF dependency: the DHM WCS returns a small, uncompressed,
+// single-band Float32 GeoTIFF, which we parse inline. (esm.sh/geotiff pulls in
+// node:vm, which the Supabase edge runtime can't load.)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -76,7 +78,74 @@ function isValidElevation(v: number) {
 // GeoServer (1.0.0) names the GeoTIFF output "GeoTIFF" or "image/tiff"; GDAL
 // servers use "GTiff". Try each so we actually get raster data instead of
 // silently falling back. The first valid TIFF wins.
-const WCS_FORMATS = ["GeoTIFF", "image/tiff", "GTiff"];
+const WCS_FORMATS = ["GTiff", "GeoTIFF", "image/tiff"];
+
+// Minimal reader for an uncompressed, single-band Float32 (or Float64) GeoTIFF
+// — exactly what Dataforsyningen's DHM WCS returns. Returns row-major samples
+// (row 0 = north). Returns null for anything it can't safely decode.
+function parseFloatTiff(u8: Uint8Array): { data: Float32Array; width: number; height: number } | null {
+  if (u8.byteLength < 8) return null;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const b0 = dv.getUint8(0);
+  const b1 = dv.getUint8(1);
+  let le: boolean;
+  if (b0 === 0x49 && b1 === 0x49) le = true; // "II"
+  else if (b0 === 0x4d && b1 === 0x4d) le = false; // "MM"
+  else return null;
+  if (dv.getUint16(2, le) !== 42) return null;
+
+  const ifdOff = dv.getUint32(4, le);
+  if (ifdOff + 2 > u8.byteLength) return null;
+  const entries = dv.getUint16(ifdOff, le);
+  const TYPE_SIZE: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+  const tags: Record<number, number[]> = {};
+  for (let i = 0; i < entries; i += 1) {
+    const e = ifdOff + 2 + i * 12;
+    const tag = dv.getUint16(e, le);
+    const type = dv.getUint16(e + 2, le);
+    const count = dv.getUint32(e + 4, le);
+    const size = (TYPE_SIZE[type] ?? 1) * count;
+    const base = size > 4 ? dv.getUint32(e + 8, le) : e + 8;
+    const vals: number[] = [];
+    for (let j = 0; j < count; j += 1) {
+      if (type === 3 || type === 8) vals.push(dv.getUint16(base + j * 2, le));
+      else if (type === 4 || type === 9) vals.push(dv.getUint32(base + j * 4, le));
+      else if (type === 1 || type === 2 || type === 6 || type === 7) vals.push(dv.getUint8(base + j));
+      else vals.push(dv.getUint32(base + j * 4, le));
+    }
+    tags[tag] = vals;
+  }
+
+  const width = tags[256]?.[0];
+  const height = tags[257]?.[0];
+  const bps = tags[258]?.[0] ?? 32;
+  const compression = tags[259]?.[0] ?? 1;
+  const samplesPerPixel = tags[277]?.[0] ?? 1;
+  const sampleFormat = tags[339]?.[0] ?? 1; // 3 = IEEE float
+  const stripOffsets = tags[273] ?? [];
+  const stripByteCounts = tags[279] ?? [];
+  if (!width || !height) return null;
+  if (compression !== 1) return null; // uncompressed only
+  if (samplesPerPixel !== 1) return null;
+  if (sampleFormat !== 3 || (bps !== 32 && bps !== 64)) return null;
+  if (!stripOffsets.length) return null;
+
+  const total = width * height;
+  const data = new Float32Array(total);
+  const bytesPer = bps / 8;
+  let idx = 0;
+  for (let s = 0; s < stripOffsets.length && idx < total; s += 1) {
+    const off = stripOffsets[s];
+    const count = Math.floor((stripByteCounts[s] ?? (total - idx) * bytesPer) / bytesPer);
+    for (let k = 0; k < count && idx < total; k += 1) {
+      const at = off + k * bytesPer;
+      if (at + bytesPer > u8.byteLength) return null;
+      data[idx] = bps === 64 ? dv.getFloat64(at, le) : dv.getFloat32(at, le);
+      idx += 1;
+    }
+  }
+  return idx === total ? { data, width, height } : null;
+}
 
 async function fetchCoverage(
   coverage: "dhm_terraen" | "dhm_overflade",
@@ -100,37 +169,107 @@ async function fetchCoverage(
       token,
     });
     const url = `https://api.dataforsyningen.dk/dhm_wcs_DAF?${params.toString()}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { signal: controller.signal });
-      if (!response.ok) {
-        console.warn(`get-elevation ${coverage} (${format}) HTTP ${response.status}`);
+      const res = await rawHttpsGet(url, timeoutMs);
+      if (!res || res.status !== 200) {
+        console.warn(`get-elevation ${coverage} (${format}) HTTP ${res?.status ?? "no-response"}`);
         continue;
       }
-      const contentType = response.headers.get("content-type") ?? "";
-      const buffer = await response.arrayBuffer();
       // WCS returns an XML ServiceExceptionReport (not a TIFF) on error.
-      if (contentType.includes("xml") || contentType.includes("html") || buffer.byteLength < 256) {
-        console.warn(`get-elevation ${coverage} (${format}) non-tiff response (${contentType}, ${buffer.byteLength}b)`);
+      if (res.body.byteLength < 256 || (res.body[0] !== 0x49 && res.body[0] !== 0x4d)) {
         continue;
       }
-      const tiff = await fromArrayBuffer(buffer);
-      const image = await tiff.getImage();
-      const rasters = await image.readRasters({ interleave: true });
-      const w = image.getWidth();
-      const h = image.getHeight();
-      const raw = rasters as unknown as ArrayLike<number>;
-      const data = new Float32Array(w * h);
-      for (let i = 0; i < w * h; i += 1) data[i] = Number(raw[i]);
-      return { data, width: w, height: h };
+      const parsed = parseFloatTiff(res.body);
+      if (!parsed) {
+        console.warn(`get-elevation ${coverage} (${format}) unparseable TIFF (${res.body.byteLength}b)`);
+        continue;
+      }
+      return parsed;
     } catch (e) {
       console.warn(`get-elevation ${coverage} (${format}) failed`, String(e));
-    } finally {
-      clearTimeout(timeout);
     }
   }
   return null;
+}
+
+// Raw HTTPS GET over Deno.connectTls. We can't use fetch() here: the
+// api.dataforsyningen.dk gateway (Gravitee) returns chunked responses and
+// closes the TLS connection without a close_notify, which Deno's fetch rejects
+// with "unexpected end of file". Reading the socket directly lets us accept the
+// full body and treat the unclean close as end-of-stream.
+async function rawHttpsGet(urlStr: string, timeoutMs: number): Promise<{ status: number; body: Uint8Array } | null> {
+  const url = new URL(urlStr);
+  const host = url.hostname;
+  const port = url.port ? Number(url.port) : 443;
+  const path = `${url.pathname}${url.search}`;
+  let conn: Deno.TlsConn | null = null;
+  const timer = setTimeout(() => { try { conn?.close(); } catch { /* already closed */ } }, timeoutMs);
+  try {
+    conn = await Deno.connectTls({ hostname: host, port });
+    const req = `GET ${path} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: havekongen-elevation\r\nAccept: */*\r\nConnection: close\r\n\r\n`;
+    await conn.write(new TextEncoder().encode(req));
+    const chunks: Uint8Array[] = [];
+    const buf = new Uint8Array(65536);
+    try {
+      while (true) {
+        const n = await conn.read(buf);
+        if (n === null) break;
+        chunks.push(buf.slice(0, n));
+      }
+    } catch { /* unclean TLS close after the full body — tolerated */ }
+    let len = 0;
+    for (const c of chunks) len += c.length;
+    const all = new Uint8Array(len);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    return parseHttpResponse(all);
+  } catch (e) {
+    console.warn("rawHttpsGet failed", String(e));
+    return null;
+  } finally {
+    clearTimeout(timer);
+    try { conn?.close(); } catch { /* already closed */ }
+  }
+}
+
+function parseHttpResponse(all: Uint8Array): { status: number; body: Uint8Array } | null {
+  let sep = -1;
+  for (let i = 0; i + 3 < all.length; i += 1) {
+    if (all[i] === 13 && all[i + 1] === 10 && all[i + 2] === 13 && all[i + 3] === 10) { sep = i; break; }
+  }
+  if (sep < 0) return null;
+  const headerText = new TextDecoder().decode(all.slice(0, sep));
+  const rawBody = all.slice(sep + 4);
+  const lines = headerText.split("\r\n");
+  const status = Number(lines[0]?.match(/HTTP\/\d\.\d\s+(\d{3})/)?.[1] ?? 0);
+  let chunked = false;
+  for (let i = 1; i < lines.length; i += 1) {
+    const idx = lines[i].indexOf(":");
+    if (idx <= 0) continue;
+    if (lines[i].slice(0, idx).trim().toLowerCase() === "transfer-encoding"
+      && lines[i].slice(idx + 1).toLowerCase().includes("chunked")) chunked = true;
+  }
+  return { status, body: chunked ? dechunk(rawBody) : rawBody };
+}
+
+function dechunk(b: Uint8Array): Uint8Array {
+  const parts: Uint8Array[] = [];
+  let i = 0;
+  while (i < b.length) {
+    let j = i;
+    while (j + 1 < b.length && !(b[j] === 13 && b[j + 1] === 10)) j += 1;
+    const size = parseInt(new TextDecoder().decode(b.slice(i, j)).split(";")[0].trim(), 16);
+    if (!Number.isFinite(size) || size <= 0) break;
+    i = j + 2;
+    parts.push(b.slice(i, i + size));
+    i += size + 2;
+  }
+  let len = 0;
+  for (const p of parts) len += p.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
 }
 
 // Resample a raw raster (row 0 = north) into a rows x cols grid of valid

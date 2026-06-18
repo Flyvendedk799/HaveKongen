@@ -1,3 +1,5 @@
+import { rawHttpsGet } from "../_shared/rawHttps.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -115,30 +117,19 @@ function metersPerPx(bbox: Bbox, width: number, height: number) {
   return ((widthM / width) + (heightM / height)) / 2;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: "image/jpeg,image/png", "Accept-Encoding": "identity" },
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function fetchImageBytes(url: string, attempts: number, timeoutMs: number): Promise<Uint8Array> {
   let lastDetail = "";
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const response = await fetchWithTimeout(url, timeoutMs);
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        lastDetail = `HTTP ${response.status}: ${text.slice(0, 200)}`;
+      // Raw TLS GET (handles the Dataforsyningen gateway's unclean TLS close).
+      const response = await rawHttpsGet(url, timeoutMs, { Accept: "image/jpeg,image/png" });
+      if (!response || response.status !== 200) {
+        lastDetail = `HTTP ${response?.status ?? "no-response"}`;
+      } else if (response.contentType.includes("xml")) {
+        lastDetail = "service exception";
+      } else if (response.body.byteLength > 100) {
+        return response.body;
       } else {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.byteLength > 100) return bytes;
         lastDetail = "empty image response";
       }
     } catch (e) {
