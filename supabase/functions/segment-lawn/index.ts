@@ -14,8 +14,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const LOVABLE_API = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const FLASH_MODEL = "google/gemini-2.5-flash";
+const OPENAI_CHAT_API = "https://api.openai.com/v1/chat/completions";
+const FLASH_MODEL = "gpt-4o-mini";
 const MODEL_TIMEOUT_MS = 13500;
 const REFINE_TIMEOUT_MS = 6500;
 const DEFAULT_CROP_METERS = 36;
@@ -109,7 +109,7 @@ async function callModel(model: string, prompt: string, b64: string, aiKey: stri
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(LOVABLE_API, {
+    const r = await fetch(OPENAI_CHAT_API, {
       method: "POST",
       signal: controller.signal,
       headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
@@ -466,9 +466,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const dfToken = Deno.env.get("DATAFORSYNINGEN_TOKEN");
-    const aiKey = Deno.env.get("LOVABLE_API_KEY");
+    const aiKey = Deno.env.get("OPENAI_API_KEY");
     if (!dfToken || !aiKey) {
-      return json({ error: "missing_config", detail: "DATAFORSYNINGEN_TOKEN or LOVABLE_API_KEY missing" }, 500);
+      return json({ error: "missing_config", detail: "DATAFORSYNINGEN_TOKEN or OPENAI_API_KEY missing" }, 500);
     }
 
     cropMeters = clampNumber(cropMeters, DEFAULT_CROP_METERS, MIN_CROP_METERS, MAX_CROP_METERS);

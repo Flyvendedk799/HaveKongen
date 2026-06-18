@@ -9,8 +9,8 @@ Deno.serve(async (req) => {
   try {
     const { question, plant, zone } = await req.json();
     if (!question) return new Response(JSON.stringify({ error: "question required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) return new Response(JSON.stringify({ error: "LOVABLE_API_KEY missing" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) return new Response(JSON.stringify({ error: "OPENAI_API_KEY missing" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     const ctx = [
       plant?.name && `Plante: ${plant.name}`,
@@ -22,11 +22,11 @@ Deno.serve(async (req) => {
       zone?.soil && `jord: ${zone.soil}`,
     ].filter(Boolean).join(" · ");
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gpt-4o-mini",
         stream: true,
         messages: [
           { role: "system", content: `Du er en dansk haveekspert. Svar kort, konkret og venligt på dansk. Maks 4-5 sætninger eller en kort punktliste. Kontekst: ${ctx}` },
