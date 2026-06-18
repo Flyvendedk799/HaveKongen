@@ -3,7 +3,34 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Box, Eye, Layers3, Map, Mountain, ShieldCheck } from "lucide-react";
 import type { GardenDepthModel, GardenDepthObject, LocalPoint } from "@/lib/gardenDepth";
-import { depthConfidenceLabel, lngLatToLocal } from "@/lib/gardenDepth";
+import { depthConfidenceLabel, lngLatToLocal, localToLngLat } from "@/lib/gardenDepth";
+import { sampleTerrain, type ElevationField } from "@/lib/gardenElevation";
+
+function elevationFieldFromModel(model: GardenDepthModel): ElevationField | null {
+  const elevation = model.terrain.elevation;
+  if (!elevation || !Array.isArray(elevation.terrain) || !elevation.terrain.length) return null;
+  return {
+    source: "dhm",
+    cols: elevation.cols,
+    rows: elevation.rows,
+    bbox: elevation.bbox,
+    terrain: elevation.terrain,
+    surface: null,
+    stats: elevation.stats,
+    resolutionM: elevation.resolutionM,
+    confidence: elevation.confidence,
+  };
+}
+
+// Ground height (relative to the garden's lowest point) at a local x/z metre offset.
+function makeGroundSampler(model: GardenDepthModel, field: ElevationField | null) {
+  if (!field) return () => 0;
+  const minM = field.stats.minM;
+  return (x: number, z: number) => {
+    const [lng, lat] = localToLngLat({ x, z }, model.center);
+    return sampleTerrain(field, lng, lat) - minM;
+  };
+}
 
 type Props = {
   model: GardenDepthModel | null;
@@ -45,6 +72,7 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
     if (!model) return null;
     const scanObjects = model.objects.filter((object) => object.source === "user_scan" || object.source === "ai_reconstruction").length;
     const scanAligned = model.alignment.mode === "scan-anchored";
+    const elevationBuilt = model.alignment.mode === "elevation-model";
     const twinStatus = model.twin.status === "scan_aligned"
       ? "Scan-aligned"
       : model.twin.status === "needs_review"
@@ -57,8 +85,9 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
       confidence: Math.round(model.alignment.confidence * 100),
       quality: model.quality.score,
       grade: model.quality.grade,
-      source: scanAligned || scanObjects ? "Full garden twin" : "Flad kort-preview",
+      source: scanAligned || scanObjects ? "Full garden twin" : elevationBuilt ? "3D-have (højdemodel)" : "Flad kort-preview",
       scanAligned,
+      elevationBuilt,
       twinStatus,
       keyframes: model.twin.evidence.keyframeCount,
       routePoses: model.twin.evidence.routePoseCount ?? 0,
@@ -67,6 +96,8 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
       modelName: model.twin.model.name,
       licenseReady: model.twin.model.commercialUseApproved,
       area: model.terrain.areaM2 ? `${Math.round(model.terrain.areaM2)} m2` : "ukendt areal",
+      reliefM: model.terrain.elevation?.stats.reliefM ?? null,
+      hasElevation: Boolean(model.terrain.elevation),
     };
   }, [model]);
 
@@ -104,13 +135,16 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
     sun.shadow.mapSize.set(1024, 1024);
     scene.add(sun);
 
-    addGround(scene, model);
-    addBoundary(scene, model.terrain.localBoundary, 0xedc88b);
-    model.terrain.localLawnRings.forEach((ring) => addRingLine(scene, ring, 0x2d6c42, 0.08));
-    model.captureReadiness.anchorSuggestions.forEach((anchor) => addAnchorMarker(scene, anchor.local));
+    const field = toggles.heights ? elevationFieldFromModel(model) : null;
+    const groundY = makeGroundSampler(model, field);
+
+    addGround(scene, model, field, groundY);
+    addBoundary(scene, model.terrain.localBoundary, 0xedc88b, groundY);
+    model.terrain.localLawnRings.forEach((ring) => addRingLine(scene, ring, 0x2d6c42, 0.08, groundY));
+    model.captureReadiness.anchorSuggestions.forEach((anchor) => addAnchorMarker(scene, anchor.local, groundY));
 
     if (toggles.objects) {
-      model.objects.forEach((object) => addObject(scene, object, toggles));
+      model.objects.forEach((object) => addObject(scene, object, toggles, groundY));
     }
     if (toggles.unknown) {
       model.terrain.unknownRegions.forEach((ring) => addUnknownRegion(scene, ring.map((point) => lngLatToLocal(point, model.center))));
@@ -179,15 +213,21 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
           <span><Box size={13} /> {stats.objects} objekter</span>
           <span><ShieldCheck size={13} /> {stats.scanAligned ? `${stats.confidence}% alignment` : "ikke scannet"}</span>
           <span><Mountain size={13} /> {stats.quality}/100 kvalitet</span>
+          {stats.hasElevation && stats.reliefM != null && <span><Mountain size={13} /> {stats.reliefM.toFixed(2)} m terrænfald</span>}
           {stats.keyframes > 0 && <span><Layers3 size={13} /> {stats.keyframes} keyframes</span>}
           {stats.routePoses > 0 && <span><Map size={13} /> {stats.routePoses} route-poser</span>}
           {stats.motionScore > 0 && <span><Eye size={13} /> {Math.round(stats.motionScore * 100)}% motion</span>}
           {warningCount > 0 && <span><Eye size={13} /> {warningCount} estimater</span>}
         </div>
       </div>
-      {!stats.scanAligned && (
+      {!stats.scanAligned && !stats.elevationBuilt && (
         <div className="garden-twin-unscanned">
-          Flad preview fra 2D-kortet. Højder, træer, hegn og forhindringer kommer først efter en scan-anchored garden twin.
+          Flad preview fra 2D-kortet. Byg 3D-haven for at få rigtige højder, terrænfald, træer, hegn og forhindringer.
+        </div>
+      )}
+      {stats.elevationBuilt && (
+        <div className="garden-twin-unscanned">
+          3D-have bygget {stats.reliefM != null ? `med ${stats.reliefM.toFixed(2)} m terrænfald fra Danmarks Højdemodel` : "med manuelt placerede objekter"}. Højder kan altid finjusteres.
         </div>
       )}
       {stats.scanAligned && (model.twin.status === "needs_review" || stats.unknownRegions > 0 || !stats.licenseReady) && (
@@ -224,7 +264,11 @@ function Toggle({ active, icon, label, onClick }: { active: boolean; icon: React
   );
 }
 
-function addGround(scene: THREE.Scene, model: GardenDepthModel) {
+function addGround(scene: THREE.Scene, model: GardenDepthModel, field: ElevationField | null, groundY: (x: number, z: number) => number) {
+  if (field) {
+    addTerrainMesh(scene, model, groundY);
+    return;
+  }
   for (const ring of model.terrain.localLawnRings) {
     if (ring.length < 3) continue;
     const shape = new THREE.Shape(ring.map((point) => new THREE.Vector2(point.x, point.z)));
@@ -242,9 +286,40 @@ function addGround(scene: THREE.Scene, model: GardenDepthModel) {
   }
 }
 
-function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: ViewerToggles) {
+// A subdivided plane over the garden bbox, displaced by real DHM terrain so
+// slopes and height differences are visible. Colored as lawn since gardens are
+// mostly greenery; outlines and objects are draped on top.
+function addTerrainMesh(scene: THREE.Scene, model: GardenDepthModel, groundY: (x: number, z: number) => number) {
+  const points = [...model.terrain.localBoundary, ...model.terrain.localLawnRings.flat()];
+  const bounds = boundsForPoints(points);
+  const pad = 1.5;
+  const width = bounds.width + pad * 2;
+  const depth = bounds.depth + pad * 2;
+  const segX = Math.max(8, Math.min(64, Math.round(width / 1.2)));
+  const segZ = Math.max(8, Math.min(64, Math.round(depth / 1.2)));
+  const geometry = new THREE.PlaneGeometry(width, depth, segX, segZ);
+  geometry.rotateX(-Math.PI / 2); // XY plane -> XZ ground, +Y up
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i) + bounds.cx;
+    const z = position.getZ(i) + bounds.cz;
+    position.setY(i, groundY(x, z));
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ color: 0x7fa07e, roughness: 0.97, metalness: 0, side: THREE.DoubleSide }),
+  );
+  mesh.position.set(bounds.cx, 0, bounds.cz);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: ViewerToggles, groundY: (x: number, z: number) => number) {
   const bounds = boundsForPoints(object.localFootprint);
   if (!Number.isFinite(bounds.width) || bounds.width <= 0 || bounds.depth <= 0) return;
+  const baseY = groundY(bounds.cx, bounds.cz);
   const height = toggles.heights
     ? object.heightM ?? ((object.heightRangeM?.[0] ?? 0.4) + (object.heightRangeM?.[1] ?? 1.2)) / 2
     : 0.12;
@@ -257,7 +332,7 @@ function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: Viewe
       new THREE.CylinderGeometry(0.16, 0.24, trunkHeight, 8),
       new THREE.MeshStandardMaterial({ color: 0x6f5135, roughness: 0.9 }),
     );
-    trunk.position.set(bounds.cx, trunkHeight / 2, bounds.cz);
+    trunk.position.set(bounds.cx, baseY + trunkHeight / 2, bounds.cz);
     trunk.castShadow = true;
     scene.add(trunk);
     const canopy = new THREE.Mesh(
@@ -265,7 +340,7 @@ function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: Viewe
       new THREE.MeshStandardMaterial({ color, transparent: true, opacity, roughness: 0.95 }),
     );
     canopy.scale.y = 0.72;
-    canopy.position.set(bounds.cx, trunkHeight + canopyRadius * 0.52, bounds.cz);
+    canopy.position.set(bounds.cx, baseY + trunkHeight + canopyRadius * 0.52, bounds.cz);
     canopy.castShadow = true;
     canopy.receiveShadow = true;
     scene.add(canopy);
@@ -277,7 +352,7 @@ function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: Viewe
       new THREE.BoxGeometry(Math.max(0.35, bounds.width), 0.04, Math.max(0.35, bounds.depth)),
       new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.68, roughness: 0.25, metalness: 0.15 }),
     );
-    water.position.set(bounds.cx, 0.03, bounds.cz);
+    water.position.set(bounds.cx, baseY + 0.03, bounds.cz);
     scene.add(water);
     return;
   }
@@ -291,33 +366,34 @@ function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: Viewe
     metalness: 0.02,
   });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(bounds.cx, Math.max(0.08, height) / 2, bounds.cz);
+  mesh.position.set(bounds.cx, baseY + Math.max(0.08, height) / 2, bounds.cz);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
 }
 
-function addAnchorMarker(scene: THREE.Scene, point: LocalPoint) {
+function addAnchorMarker(scene: THREE.Scene, point: LocalPoint, groundY: (x: number, z: number) => number) {
+  const base = groundY(point.x, point.z);
   const geometry = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 16);
   const material = new THREE.MeshBasicMaterial({ color: 0xedc88b, transparent: true, opacity: 0.82 });
   const marker = new THREE.Mesh(geometry, material);
-  marker.position.set(point.x, 0.12, point.z);
+  marker.position.set(point.x, base + 0.12, point.z);
   scene.add(marker);
   const ring = new THREE.RingGeometry(0.42, 0.52, 24);
   const ringMat = new THREE.MeshBasicMaterial({ color: 0xedc88b, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
   const halo = new THREE.Mesh(ring, ringMat);
   halo.rotation.x = -Math.PI / 2;
-  halo.position.set(point.x, 0.15, point.z);
+  halo.position.set(point.x, base + 0.15, point.z);
   scene.add(halo);
 }
 
-function addBoundary(scene: THREE.Scene, ring: LocalPoint[], color: number) {
-  addRingLine(scene, ring, color, 0.16);
+function addBoundary(scene: THREE.Scene, ring: LocalPoint[], color: number, groundY: (x: number, z: number) => number) {
+  addRingLine(scene, ring, color, 0.16, groundY);
 }
 
-function addRingLine(scene: THREE.Scene, ring: LocalPoint[], color: number, y: number) {
+function addRingLine(scene: THREE.Scene, ring: LocalPoint[], color: number, y: number, groundY: (x: number, z: number) => number) {
   if (ring.length < 2) return;
-  const points = [...ring, ring[0]].map((point) => new THREE.Vector3(point.x, y, point.z));
+  const points = [...ring, ring[0]].map((point) => new THREE.Vector3(point.x, groundY(point.x, point.z) + y, point.z));
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({ color, linewidth: 2 });
   scene.add(new THREE.Line(geometry, material));

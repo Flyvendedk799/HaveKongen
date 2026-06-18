@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent, CSSProperties, ElementType, FormEvent, ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Bell, Bot, CalendarDays, CheckCircle2, CloudSun, Database, Link2, MapPinned, PauseCircle, PlugZap, RefreshCcw, Ruler, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Bell, Bot, CalendarDays, CheckCircle2, CloudSun, Database, Layers3, Link2, MapPinned, PauseCircle, PlugZap, RefreshCcw, Ruler, ShieldCheck, Sparkles } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import GardenThumbnailImage from "@/components/garden/GardenThumbnailImage";
 import { supabase } from "@/integrations/supabase/client";
@@ -435,6 +435,9 @@ export default function Account() {
                         )}
                         <Link to={editMeasurementPath(g.id)} className="btn btn-ghost btn-sm">
                           <Ruler size={14} /> Rediger måling
+                        </Link>
+                        <Link to={`/havemaaler/3d?garden=${g.id}`} onClick={() => setActive(g.id)} className="btn btn-ghost btn-sm">
+                          <Layers3 size={14} /> Byg 3D-have
                         </Link>
                         <Link to="/havekompagnon" onClick={() => setActive(g.id)} className="btn btn-ghost btn-sm">Havekompagnon</Link>
                       </div>
