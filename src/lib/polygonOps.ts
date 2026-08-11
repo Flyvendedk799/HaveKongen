@@ -1,5 +1,5 @@
 import * as turf from "@turf/turf";
-import type mapboxgl from "mapbox-gl";
+import type maplibregl from "maplibre-gl";
 
 export type LngLat = [number, number];
 export type Ring = LngLat[];
@@ -96,8 +96,8 @@ export function subtractRings(a: Ring, b: Ring): Ring | null {
   } catch { return null; }
 }
 
-/** Distance between two lng/lat points in pixels at given mapbox map. */
-export function pixelDistance(map: mapboxgl.Map, a: LngLat, b: LngLat): number {
+/** Distance between two lng/lat points in pixels at given map. */
+export function pixelDistance(map: maplibregl.Map, a: LngLat, b: LngLat): number {
   const pa = map.project(a), pb = map.project(b);
   return Math.hypot(pa.x - pb.x, pa.y - pb.y);
 }

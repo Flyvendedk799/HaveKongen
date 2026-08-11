@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import mapboxgl from "mapbox-gl";
+import maplibregl from "maplibre-gl";
 import * as turf from "@turf/turf";
-import "mapbox-gl/dist/mapbox-gl.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
@@ -49,13 +49,24 @@ import {
 import { isTerminalScanStatus, scanCanStartNewSession, webGardenScanUrl } from "@/lib/gardenScan";
 import type { GardenScanSession, ScanUploadTarget } from "@/lib/gardenScan";
 import { gardenStaticSatelliteUrl } from "@/lib/gardenThumbnail";
+import {
+  MAP_FONT_STACK,
+  MAP_GLYPHS,
+  ORTOFOTO_ATTRIBUTION,
+  ortofotoTileTemplate,
+} from "@/lib/ortofoto";
 
-type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" | "mapbox" };
+type Suggestion = { id: string; place_name: string; center: [number, number]; text: string; source?: "dawa" };
 type Mode = "draw" | "exclude" | "edit" | "wand";
 type WandOp = "replace" | "add" | "subtract";
 type WandReviewMode = "none" | "add" | "remove";
 type WandStage = "idle" | "Henter billede" | "Finder græs" | "Tegner kant" | "Klar til tjek";
-type Imagery = "ortofoto" | "mapbox";
+/**
+ * Persisted on `gardens.imagery_source`. Only "ortofoto" is produced now — the
+ * "mapbox" value is still read back so gardens measured before the Mapbox removal
+ * keep their geometry fingerprint (and therefore their saved 3D depth model).
+ */
+type ImagerySource = "ortofoto" | "mapbox";
 type MapView = "map" | "twin";
 type EditableRingId = "main" | `lawn:${number}` | `excl:${number}`;
 type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "area_m2" | "polygon" | "exclusions" | "imagery_source" | "thumbnail_url" | "depth_model" | "depth_model_updated_at">;
@@ -140,7 +151,7 @@ function lngLatFromUnknown(value: unknown): LngLat | null {
   return isLngLat(value) ? [value[0], value[1]] : null;
 }
 
-function featureProps(feature: mapboxgl.MapboxGeoJSONFeature): JsonRecord {
+function featureProps(feature: maplibregl.MapGeoJSONFeature): JsonRecord {
   return feature.properties ?? {};
 }
 
@@ -176,20 +187,6 @@ function parseDawaSuggestion(item: unknown): Suggestion | null {
   };
 }
 
-function parseMapboxSuggestion(feature: unknown): Suggestion | null {
-  const record = recordOrNull(feature);
-  if (!record) return null;
-  const center = lngLatFromUnknown(record.center);
-  if (!center) return null;
-  return {
-    id: stringOrFallback(record.id, `${center[0]},${center[1]}`),
-    place_name: stringOrFallback(record.place_name),
-    center,
-    text: stringOrFallback(record.text),
-    source: "mapbox",
-  };
-}
-
 const TIERS = [
   { name: "Klipper R1 Mini",   tier: "Indgangsmodel", max: 600,  price: "6.299 kr",  battery: "90 min",  noise: "52 dB" },
   { name: "Klipper R2 Plus",   tier: "Familie",       max: 1200, price: "9.499 kr",  battery: "140 min", noise: "55 dB" },
@@ -205,7 +202,6 @@ export default function GardenSizer() {
   const gardenIdParam = searchParams.get("garden") ?? searchParams.get("gardenId");
   const returnTo = safeInternalPath(searchParams.get("next"));
 
-  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
   const [ortoCfg, setOrtoCfg] = useState<{ wmsTemplate: string } | null>(null);
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -214,7 +210,7 @@ export default function GardenSizer() {
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<{ name: string; center: LngLat } | null>(null);
 
-  const [imagery, setImagery] = useState<Imagery>("ortofoto");
+  const [imagerySource, setImagerySource] = useState<ImagerySource>("ortofoto");
   const [mode, setMode] = useState<Mode>("draw");
   const [mapView, setMapView] = useState<MapView>("map");
 
@@ -256,7 +252,7 @@ export default function GardenSizer() {
   const historyRef = useRef<{ past: Snap[]; future: Snap[] }>({ past: [], future: [] });
   const skipHistoryRef = useRef(false);
 
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const closeClickHandledAtRef = useRef(0);
   const completedLawns = useMemo(
@@ -271,18 +267,22 @@ export default function GardenSizer() {
     return () => document.body.classList.remove("is-havemaaler-measuring");
   }, [step]);
 
-  // ----- Tokens -----
+  // ----- Imagery -----
+  // The tile URL is built client-side (see lib/ortofoto). get-ortofoto-config is
+  // only asked whether the ortofoto service is actually configured.
   useEffect(() => {
-    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
-      if (!error && data?.token) {
-        setMapboxToken(data.token);
-        mapboxgl.accessToken = data.token;
-      } else toast.error("Kunne ikke hente kort-token");
-    });
-    supabase.functions.invoke("get-ortofoto-config").then(({ data }) => {
-      if (data?.wmsTemplate) setOrtoCfg({ wmsTemplate: data.wmsTemplate });
-      else setImagery("mapbox");
-    }).catch(() => setImagery("mapbox"));
+    const template = ortofotoTileTemplate();
+    if (!template) {
+      toast.error("Kortet er ikke konfigureret");
+      return;
+    }
+    supabase.functions.invoke("get-ortofoto-config").then(({ data, error }) => {
+      if (error || data?.available === false) {
+        toast.error("Kunne ikke hente luftfoto");
+        return;
+      }
+      setOrtoCfg({ wmsTemplate: template });
+    }).catch(() => toast.error("Kunne ikke hente luftfoto"));
   }, []);
 
   useEffect(() => {
@@ -293,7 +293,7 @@ export default function GardenSizer() {
 
   // ----- Pre-connect warm-up so the pinpoint overlay boots without a freeze -----
   useEffect(() => {
-    const hosts = ["https://api.mapbox.com", "https://api.dataforsyningen.dk"];
+    const hosts = ["https://api.dataforsyningen.dk"];
     const links: HTMLLinkElement[] = [];
     hosts.forEach((href) => {
       const l = document.createElement("link");
@@ -310,23 +310,17 @@ export default function GardenSizer() {
       const dawaUrl = `https://api.dataforsyningen.dk/adresser/autocomplete?q=${encodeURIComponent(query)}&type=adresse&per_side=6`;
       try {
         const r = await fetch(dawaUrl); const j = await r.json();
-        const exact = (Array.isArray(j) ? j : [])
+        // DAWA is the official Danish address register, so it is authoritative
+        // for every address this app can measure — there is no second geocoder.
+        setSuggestions(uniqueSuggestions((Array.isArray(j) ? j : [])
           .map(parseDawaSuggestion)
-          .filter((item): item is Suggestion => Boolean(item));
-        if (exact.length) { setSuggestions(uniqueSuggestions(exact)); return; }
-        if (!mapboxToken) return;
-        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=dk&language=da&limit=6&access_token=${mapboxToken}`;
-        const mr = await fetch(url); const mj = await mr.json();
-        const features = recordOrNull(mj)?.features;
-        setSuggestions(uniqueSuggestions((Array.isArray(features) ? features : [])
-          .map(parseMapboxSuggestion)
           .filter((item): item is Suggestion => Boolean(item))));
       } catch {
         /* Address suggestions are best effort while the user is typing. */
       }
     }, 220);
     return () => clearTimeout(t);
-  }, [query, mapboxToken]);
+  }, [query]);
 
   function chooseAddress(s: Suggestion) {
     setQuery(s.place_name); setOpen(false);
@@ -349,40 +343,33 @@ export default function GardenSizer() {
     toast(query.trim().length < 2 ? "Indtast en adresse først" : "Vælg en adresse fra listen");
   }
 
-  // ----- Build style for current imagery choice -----
-  const buildStyle = useCallback((): mapboxgl.Style | string => {
-    if (imagery === "ortofoto" && ortoCfg) {
-      return {
-        version: 8,
-        glyphs: "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
-        sources: {
-          sat: {
-            type: "raster",
-            tiles: [`https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`],
-            tileSize: 256,
-            attribution: "© Mapbox",
-            maxzoom: 19,
-          },
-          orto: {
-            type: "raster",
-            tiles: [ortoCfg.wmsTemplate],
-            tileSize: 512,
-            attribution: "© SDFE / Dataforsyningen",
-          },
+  // ----- Build style -----
+  const buildStyle = useCallback((): maplibregl.StyleSpecification => ({
+    version: 8,
+    glyphs: MAP_GLYPHS,
+    sources: ortoCfg
+      ? {
+        orto: {
+          type: "raster",
+          tiles: [ortoCfg.wmsTemplate],
+          tileSize: 512,
+          attribution: ORTOFOTO_ATTRIBUTION,
         },
-        layers: [
-          { id: "sat", type: "raster", source: "sat" },
-          { id: "orto", type: "raster", source: "orto", paint: { "raster-opacity": 0.88 } },
-        ],
-      };
-    }
-    return "mapbox://styles/mapbox/satellite-streets-v12";
-  }, [imagery, ortoCfg, mapboxToken]);
+      }
+      : {},
+    layers: [
+      // Ground colour shows through wherever the ortofoto proxy has nothing to
+      // serve, so a dropped tile reads as "no imagery" rather than a white hole.
+      { id: "ground", type: "background", paint: { "background-color": "#0f1f18" } },
+      ...(ortoCfg
+        ? [{ id: "orto", type: "raster" as const, source: "orto", paint: { "raster-opacity": 1 } }]
+        : []),
+    ],
+  }), [ortoCfg]);
 
   // ----- Init / re-init map -----
   useEffect(() => {
-    if (step !== 2 || !chosen || !mapboxToken || !containerRef.current) return;
-    if (imagery === "ortofoto" && !ortoCfg) return; // wait for config
+    if (step !== 2 || !chosen || !ortoCfg || !containerRef.current) return;
 
     if (mapRef.current) {
       mapRef.current.setStyle(buildStyle());
@@ -391,7 +378,7 @@ export default function GardenSizer() {
       return;
     }
 
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
       container: containerRef.current,
       style: buildStyle(),
       center: chosen.center,
@@ -399,7 +386,7 @@ export default function GardenSizer() {
       pitch: 0,
       preserveDrawingBuffer: true, // needed for magic wand pixel readback
     });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
     map.on("load", addOverlayLayers);
     map.on("click", onMapClick);
@@ -414,16 +401,7 @@ export default function GardenSizer() {
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, mapboxToken, ortoCfg, chosen?.center?.[0], chosen?.center?.[1]]);
-
-  // Style swap when imagery changes
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.setStyle(buildStyle());
-    map.once("style.load", addOverlayLayers);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imagery, ortoCfg]);
+  }, [step, ortoCfg, chosen?.center?.[0], chosen?.center?.[1]]);
 
   function addOverlayLayers() {
     const map = mapRef.current; if (!map) return;
@@ -460,7 +438,7 @@ export default function GardenSizer() {
     if (!map.getSource("edge-labels")) {
       map.addSource("edge-labels", { type: "geojson", data: empty });
       map.addLayer({ id: "edge-labels", type: "symbol", source: "edge-labels",
-        layout: { "text-field": ["get", "label"], "text-size": 11, "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"], "text-allow-overlap": true },
+        layout: { "text-field": ["get", "label"], "text-size": 11, "text-font": MAP_FONT_STACK, "text-allow-overlap": true },
         paint: { "text-color": "#edcf95", "text-halo-color": "#14271d", "text-halo-width": 1.5 } });
     }
     if (!map.getSource("snap")) {
@@ -537,7 +515,7 @@ export default function GardenSizer() {
     }
   }
 
-  function onMapClick(e: mapboxgl.MapMouseEvent) {
+  function onMapClick(e: maplibregl.MapMouseEvent) {
     const map = mapRef.current!;
     let ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
     const s = stateRef.current;
@@ -599,7 +577,7 @@ export default function GardenSizer() {
     }
   }
 
-  function onMapDblClick(e: mapboxgl.MapMouseEvent) {
+  function onMapDblClick(e: maplibregl.MapMouseEvent) {
     e.preventDefault();
     if (Date.now() - closeClickHandledAtRef.current < 350) return;
     const s = stateRef.current;
@@ -613,7 +591,7 @@ export default function GardenSizer() {
     }
   }
 
-  function onMapContextMenu(e: mapboxgl.MapMouseEvent) {
+  function onMapContextMenu(e: maplibregl.MapMouseEvent) {
     const s = stateRef.current;
     if (s.mode !== "edit") return;
     const map = mapRef.current!;
@@ -628,7 +606,7 @@ export default function GardenSizer() {
     vibrateDevice(20);
   }
 
-  function onMapMouseDown(e: mapboxgl.MapMouseEvent) {
+  function onMapMouseDown(e: maplibregl.MapMouseEvent) {
     const s = stateRef.current; if (s.mode !== "edit") return;
     const map = mapRef.current!;
     const feats = map.queryRenderedFeatures(e.point, { layers: ["vertices-circle"] });
@@ -643,7 +621,7 @@ export default function GardenSizer() {
     e.preventDefault();
   }
 
-  function onMapMove(e: mapboxgl.MapMouseEvent) {
+  function onMapMove(e: maplibregl.MapMouseEvent) {
     const ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
     const s = stateRef.current;
     if (s.mode === "wand") setWandHoverPos(ll);
@@ -705,7 +683,7 @@ export default function GardenSizer() {
         geometry: { type: "LineString", coordinates: liveLawn },
       });
     }
-    (map.getSource("polygon") as mapboxgl.GeoJSONSource)?.setData(polyData);
+    (map.getSource("polygon") as maplibregl.GeoJSONSource)?.setData(polyData);
 
     // Exclusions
     const exclData = emptyFeatureCollection();
@@ -720,7 +698,7 @@ export default function GardenSizer() {
         geometry: { type: "LineString", coordinates: liveExcl },
       });
     }
-    (map.getSource("exclusions") as mapboxgl.GeoJSONSource)?.setData(exclData);
+    (map.getSource("exclusions") as maplibregl.GeoJSONSource)?.setData(exclData);
 
     // Vertices (real + midpoints in edit mode)
     const vData = emptyFeatureCollection();
@@ -745,7 +723,7 @@ export default function GardenSizer() {
     additionalLawns.forEach((r, i) => pushRing(r, `lawn:${i}`));
     if (mode === "draw" && mainClosed && currentLawn.length) pushRing(currentLawn, "draft");
     exclusions.forEach((r, i) => pushRing(r, `excl:${i}`));
-    (map.getSource("vertices") as mapboxgl.GeoJSONSource)?.setData(vData);
+    (map.getSource("vertices") as maplibregl.GeoJSONSource)?.setData(vData);
 
     // Edge labels for the active drawing ring or all completed lawns in edit mode.
     const labelData = emptyFeatureCollection();
@@ -768,7 +746,7 @@ export default function GardenSizer() {
       if (mainClosed) [main, ...additionalLawns].forEach((r) => pushLabels(r, true));
       else pushLabels(main, false);
     }
-    (map.getSource("edge-labels") as mapboxgl.GeoJSONSource)?.setData(labelData);
+    (map.getSource("edge-labels") as maplibregl.GeoJSONSource)?.setData(labelData);
 
     // Matrikel
     const matrData = emptyFeatureCollection();
@@ -778,12 +756,12 @@ export default function GardenSizer() {
         geometry: { type: "Polygon", coordinates: [[...matrikel, matrikel[0]]] },
       });
     }
-    (map.getSource("matrikel") as mapboxgl.GeoJSONSource)?.setData(matrData);
+    (map.getSource("matrikel") as maplibregl.GeoJSONSource)?.setData(matrData);
 
     // Snap indicator
     const snapData = emptyFeatureCollection();
     if (snapIndicator) snapData.features.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: snapIndicator } });
-    (map.getSource("snap") as mapboxgl.GeoJSONSource)?.setData(snapData);
+    (map.getSource("snap") as maplibregl.GeoJSONSource)?.setData(snapData);
 
     // Wand area preview / analyzed bbox
     const wandData = emptyFeatureCollection();
@@ -799,7 +777,7 @@ export default function GardenSizer() {
         geometry: { type: "Polygon", coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
       });
     }
-    (map.getSource("wand-area") as mapboxgl.GeoJSONSource)?.setData(wandData);
+    (map.getSource("wand-area") as maplibregl.GeoJSONSource)?.setData(wandData);
 
     const wandPreviewData = emptyFeatureCollection();
     const wandPreviewExclusionsData = emptyFeatureCollection();
@@ -819,8 +797,8 @@ export default function GardenSizer() {
         });
       });
     }
-    (map.getSource("wand-preview") as mapboxgl.GeoJSONSource)?.setData(wandPreviewData);
-    (map.getSource("wand-preview-exclusions") as mapboxgl.GeoJSONSource)?.setData(wandPreviewExclusionsData);
+    (map.getSource("wand-preview") as maplibregl.GeoJSONSource)?.setData(wandPreviewData);
+    (map.getSource("wand-preview-exclusions") as maplibregl.GeoJSONSource)?.setData(wandPreviewExclusionsData);
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -865,9 +843,9 @@ export default function GardenSizer() {
     lawns: completedLawns,
     exclusions,
     matrikel,
-    imagery,
+    imagery: imagerySource,
     areaM2: area > 0 ? area : null,
-  }), [area, chosen?.center, chosen?.name, completedLawns, editingGarden?.name, exclusions, imagery, matrikel]);
+  }), [area, chosen?.center, chosen?.name, completedLawns, editingGarden?.name, exclusions, imagerySource, matrikel]);
   const savedDepthModelIsFresh = Boolean(savedDepthModel && savedGeometryFingerprint === currentGeometryFingerprint);
   const activeDepthModel = savedDepthModelIsFresh ? savedDepthModel : generatedDepthModel;
   const lastGeometryFingerprintRef = useRef<string | null>(null);
@@ -982,12 +960,12 @@ export default function GardenSizer() {
   }
 
   async function readStaticSatelliteThumbnailBlob() {
-    if (!chosen || !mapboxToken) return null;
+    if (!chosen) return null;
     const url = gardenStaticSatelliteUrl({
       thumbnail_url: null,
       latitude: chosen.center[1],
       longitude: chosen.center[0],
-    }, mapboxToken);
+    });
     if (!url) return null;
 
     try {
@@ -1054,7 +1032,7 @@ export default function GardenSizer() {
         area_m2: Math.round(area),
         polygon: gardenPolygon,
         exclusions: serializeExclusions(exclusions),
-        imagery_source: imagery,
+        imagery_source: imagerySource,
         thumbnail_url,
       };
       const gardenPayloadWithDepth = {
@@ -1407,15 +1385,12 @@ export default function GardenSizer() {
       candidateCount: result.diagnostics.candidateCount,
     });
     const conf = Math.round(result.confidence * 100);
-    const providerNote = crop.imagerySource === "mapbox" ? "Ortofoto fejlede, så Mapbox blev brugt." : undefined;
     if (result.needsReview) {
       toast("Forslag klar til tjek", {
-        description: providerNote ?? `AI er ${conf}% sikker. Klik på græs der mangler, eller område der skal væk.`,
+        description: `AI er ${conf}% sikker. Klik på græs der mangler, eller område der skal væk.`,
       });
     } else {
-      toast.success(cached ? "Hentet fra godkendt cache" : `Forslag klar (${conf}% sikker)`, {
-        description: providerNote,
-      });
+      toast.success(cached ? "Hentet fra godkendt cache" : `Forslag klar (${conf}% sikker)`);
     }
   }
 
@@ -1627,14 +1602,15 @@ export default function GardenSizer() {
     const t = setTimeout(() => {
       try {
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
-          chosen, main, mainClosed, additionalLawns, currentLawn, exclusions, imagery, savedAt: Date.now(),
+          chosen, main, mainClosed, additionalLawns, currentLawn, exclusions,
+          imagery: imagerySource, savedAt: Date.now(),
         }));
       } catch {
         /* Autosave can fail in private browsing or full storage; drawing still works. */
       }
     }, 800);
     return () => clearTimeout(t);
-  }, [step, chosen, main, mainClosed, additionalLawns, currentLawn, exclusions, imagery, editingGarden]);
+  }, [step, chosen, main, mainClosed, additionalLawns, currentLawn, exclusions, imagerySource, editingGarden]);
 
   // Restore draft on mount
   useEffect(() => {
@@ -1649,7 +1625,7 @@ export default function GardenSizer() {
       setAdditionalLawns(d.additionalLawns ?? []);
       setCurrentLawn(d.currentLawn ?? []);
       setExclusions(d.exclusions ?? []);
-      if (d.imagery) setImagery(d.imagery);
+      if (d.imagery) setImagerySource(d.imagery);
       setStep(2);
       toast("Gendannet kladde", { description: "Din tidligere måling er hentet frem" });
     } catch {
@@ -1727,7 +1703,7 @@ export default function GardenSizer() {
 
       const label = savedGarden.address || savedGarden.name || "Min have";
       const savedExclusions = exclusionRingsFromJson(savedGarden.exclusions);
-      const savedImagery = savedGarden.imagery_source === "mapbox" ? "mapbox" : "ortofoto";
+      const savedImagery: ImagerySource = savedGarden.imagery_source === "mapbox" ? "mapbox" : "ortofoto";
       setEditingGarden(savedGarden);
       setActive(savedGarden.id);
       setChosen({ name: label, center });
@@ -1748,7 +1724,7 @@ export default function GardenSizer() {
       }));
       setScanLaunch(null);
       clearWandPreview();
-      setImagery(savedImagery);
+      setImagerySource(savedImagery);
       setMode("edit");
       setMapView("map");
       setStep(2);
@@ -1945,10 +1921,7 @@ export default function GardenSizer() {
                   <button onClick={() => setMapView("map")} style={{ padding: "6px 10px", background: mapView === "map" ? "var(--gold)" : "transparent", color: mapView === "map" ? "#14271d" : "inherit", border: 0 }}>2D kort</button>
                   <button onClick={() => { if (!activeDepthModel) refreshDepthPreview(); else setMapView("twin"); }} disabled={!generatedDepthModel} style={{ padding: "6px 10px", background: mapView === "twin" ? "var(--gold)" : "transparent", color: mapView === "twin" ? "#14271d" : "inherit", border: 0, opacity: generatedDepthModel ? 1 : 0.45 }}>3D preview</button>
                 </div>
-                <div className="imagery-toggle" style={{ display: "flex", gap: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
-                  <button onClick={() => ortoCfg && setImagery("ortofoto")} disabled={!ortoCfg} style={{ padding: "6px 10px", background: imagery === "ortofoto" ? "var(--gold)" : "transparent", color: imagery === "ortofoto" ? "#14271d" : "inherit", border: 0, opacity: ortoCfg ? 1 : 0.45 }}>Ortofoto 12cm</button>
-                  <button onClick={() => setImagery("mapbox")} style={{ padding: "6px 10px", background: imagery === "mapbox" ? "var(--gold)" : "transparent", color: imagery === "mapbox" ? "#14271d" : "inherit", border: 0 }}>Mapbox</button>
-                </div>
+                <span style={{ fontSize: 12, color: "var(--ink-500)" }}>Ortofoto 12 cm</span>
                 <button className="change-addr" aria-label="Skift adresse" title="Skift adresse" onClick={() => { setStep(1); clear(); }}>
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M2 6l3-3M2 6l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
                   Skift adresse
@@ -2143,11 +2116,10 @@ export default function GardenSizer() {
         )}
       </div>
       <SiteFooter />
-      {pinpointing && mapboxToken && (
+      {pinpointing && (
         <PinpointSequence
           address={pinpointing.name}
           center={pinpointing.center}
-          mapboxToken={mapboxToken}
           ortoWmsTemplate={ortoCfg?.wmsTemplate ?? null}
           onDone={() => {
             setChosen({ name: pinpointing.name, center: pinpointing.center });

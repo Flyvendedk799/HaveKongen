@@ -157,13 +157,6 @@ function dataforsyningenUrl(bbox: Bbox, width: number, height: number, token: st
     + `&bbox=${minLat},${minLng},${maxLat},${maxLng}&token=${encodeURIComponent(token)}`;
 }
 
-function mapboxStaticUrl(bbox: Bbox, width: number, height: number, token: string) {
-  const [minLng, minLat, maxLng, maxLat] = bbox;
-  return "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/"
-    + `[${minLng},${minLat},${maxLng},${maxLat}]/${width}x${height}`
-    + `?access_token=${encodeURIComponent(token)}`;
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed", detail: "POST required" }, 405);
@@ -204,44 +197,31 @@ Deno.serve(async (req: Request) => {
     }
 
     const dataforsyningenToken = Deno.env.get("DATAFORSYNINGEN_TOKEN");
-    const mapboxToken = Deno.env.get("MAPBOX_PUBLIC_TOKEN");
     const diagnostics: Record<string, unknown> = {
       cropMeters,
       width,
       height,
       bbox,
-      fallbacks: [],
     };
 
-    let bytes: Uint8Array | null = null;
-    let imagerySource: "dataforsyningen" | "mapbox" = "dataforsyningen";
-    if (dataforsyningenToken) {
-      try {
-        bytes = await fetchImageBytes(dataforsyningenUrl(bbox, width, height, dataforsyningenToken), 2, 5200);
-      } catch (e) {
-        diagnostics.dataforsyningenError = String(e);
-        (diagnostics.fallbacks as string[]).push("mapbox");
-      }
-    } else {
+    // Dataforsyningen is the only imagery provider — it is the same source the map
+    // shows, so the crop the wand analyses always matches what the user drew on.
+    if (!dataforsyningenToken) {
       diagnostics.dataforsyningenError = "DATAFORSYNINGEN_TOKEN missing";
-      (diagnostics.fallbacks as string[]).push("mapbox");
+      return json({
+        error: "imagery_fetch_failed",
+        detail: "DATAFORSYNINGEN_TOKEN missing",
+        diagnostics,
+      }, 502);
     }
 
-    if (!bytes) {
-      if (!mapboxToken) {
-        return json({
-          error: "imagery_fetch_failed",
-          detail: diagnostics.dataforsyningenError ?? "No imagery provider available",
-          diagnostics,
-        }, 502);
-      }
-      imagerySource = "mapbox";
-      try {
-        bytes = await fetchImageBytes(mapboxStaticUrl(bbox, width, height, mapboxToken), 1, 6500);
-      } catch (e) {
-        diagnostics.mapboxError = String(e);
-        return json({ error: "imagery_fetch_failed", detail: String(e), diagnostics }, 502);
-      }
+    let bytes: Uint8Array;
+    const imagerySource: "dataforsyningen" = "dataforsyningen";
+    try {
+      bytes = await fetchImageBytes(dataforsyningenUrl(bbox, width, height, dataforsyningenToken), 2, 5200);
+    } catch (e) {
+      diagnostics.dataforsyningenError = String(e);
+      return json({ error: "imagery_fetch_failed", detail: String(e), diagnostics }, 502);
     }
 
     const clickPx = lngLatToPixel([lng, lat], bbox, width, height);

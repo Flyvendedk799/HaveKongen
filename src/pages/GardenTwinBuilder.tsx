@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Mountain, Layers3, Trash2, RotateCw, Ruler, Sparkles, Save, MapPin, Copy, Undo2, Redo2, Wand2, AlertTriangle } from "lucide-react";
@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
+import { MAP_GLYPHS, ORTOFOTO_ATTRIBUTION, ortofotoTileTemplate } from "@/lib/ortofoto";
 import GardenTwinViewer from "@/components/havemaaler/GardenTwinViewer";
 import {
   buildGardenTwinModel,
@@ -103,7 +104,6 @@ export default function GardenTwinBuilder() {
   const { setActive } = useActiveGarden();
   const gardenId = searchParams.get("garden") ?? searchParams.get("gardenId") ?? searchParams.get("garden_id");
 
-  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
   const [ortoCfg, setOrtoCfg] = useState<{ wmsTemplate: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -121,7 +121,7 @@ export default function GardenTwinBuilder() {
   const [placingType, setPlacingType] = useState<BuilderObjectType | null>(null);
   const [view, setView] = useState<"map" | "3d">("map");
 
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<string | null>(null);
 
@@ -145,19 +145,20 @@ export default function GardenTwinBuilder() {
   const summary = model ? summarizeDepthModel(model) : null;
   const slope = useMemo(() => (elevation ? terrainSlopeStats(elevation) : null), [elevation]);
 
-  // ----- Tokens & imagery config -----
+  // ----- Imagery config -----
   useEffect(() => {
-    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
-      if (!error && data?.token) {
-        setMapboxToken(data.token);
-        mapboxgl.accessToken = data.token;
-      } else {
-        toast.error("Kunne ikke hente kort-token");
+    const template = ortofotoTileTemplate();
+    if (!template) {
+      toast.error("Kortet er ikke konfigureret");
+      return;
+    }
+    supabase.functions.invoke("get-ortofoto-config").then(({ data, error }) => {
+      if (error || data?.available === false) {
+        toast.error("Kunne ikke hente luftfoto");
+        return;
       }
-    });
-    supabase.functions.invoke("get-ortofoto-config").then(({ data }) => {
-      if (data?.wmsTemplate) setOrtoCfg({ wmsTemplate: data.wmsTemplate });
-    }).catch(() => { /* ortofoto is optional; Mapbox satellite is the fallback */ });
+      setOrtoCfg({ wmsTemplate: template });
+    }).catch(() => toast.error("Kunne ikke hente luftfoto"));
   }, []);
 
   // ----- Auth gate -----
@@ -267,27 +268,30 @@ export default function GardenTwinBuilder() {
   }, [elevationStatus, elevation]);
 
   // ----- Map setup -----
-  const buildStyle = useCallback((): mapboxgl.Style | string => {
-    if (ortoCfg && mapboxToken) {
-      return {
-        version: 8,
-        glyphs: "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
-        sources: {
-          sat: { type: "raster", tiles: [`https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`], tileSize: 256, maxzoom: 19 },
-          orto: { type: "raster", tiles: [ortoCfg.wmsTemplate], tileSize: 512, attribution: "© SDFE / Dataforsyningen" },
+  const buildStyle = useCallback((): maplibregl.StyleSpecification => ({
+    version: 8,
+    glyphs: MAP_GLYPHS,
+    sources: ortoCfg
+      ? {
+        orto: {
+          type: "raster",
+          tiles: [ortoCfg.wmsTemplate],
+          tileSize: 512,
+          attribution: ORTOFOTO_ATTRIBUTION,
         },
-        layers: [
-          { id: "sat", type: "raster", source: "sat" },
-          { id: "orto", type: "raster", source: "orto", paint: { "raster-opacity": 0.88 } },
-        ],
-      };
-    }
-    return "mapbox://styles/mapbox/satellite-streets-v12";
-  }, [ortoCfg, mapboxToken]);
+      }
+      : {},
+    layers: [
+      { id: "ground", type: "background", paint: { "background-color": "#0f1f18" } },
+      ...(ortoCfg
+        ? [{ id: "orto", type: "raster" as const, source: "orto", paint: { "raster-opacity": 1 } }]
+        : []),
+    ],
+  }), [ortoCfg]);
 
   useEffect(() => {
-    if (view !== "map" || !center || !mapboxToken || !containerRef.current || mapRef.current) return;
-    const map = new mapboxgl.Map({
+    if (view !== "map" || !center || !ortoCfg || !containerRef.current || mapRef.current) return;
+    const map = new maplibregl.Map({
       container: containerRef.current,
       style: buildStyle(),
       center,
@@ -295,7 +299,7 @@ export default function GardenTwinBuilder() {
       minZoom: 14,
       maxZoom: 21,
     });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
     map.on("load", () => { addLayers(); syncMap(); });
     map.on("click", onMapClick);
@@ -304,7 +308,7 @@ export default function GardenTwinBuilder() {
     map.on("mouseup", () => { draggingRef.current = null; map.dragPan.enable(); });
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, center, mapboxToken, ortoCfg]);
+  }, [view, center, ortoCfg]);
 
   function addLayers() {
     const map = mapRef.current;
@@ -384,7 +388,7 @@ export default function GardenTwinBuilder() {
   const canRedo = futureRef.current.length > 0;
   void historyTick;
 
-  function onMapClick(e: mapboxgl.MapMouseEvent) {
+  function onMapClick(e: maplibregl.MapMouseEvent) {
     const map = mapRef.current!;
     const ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
     const s = stateRef.current;
@@ -397,7 +401,7 @@ export default function GardenTwinBuilder() {
     setSelectedId(id ?? null);
   }
 
-  function onMapMouseDown(e: mapboxgl.MapMouseEvent) {
+  function onMapMouseDown(e: maplibregl.MapMouseEvent) {
     const map = mapRef.current!;
     const s = stateRef.current;
     if (s.placingType) return;
@@ -411,7 +415,7 @@ export default function GardenTwinBuilder() {
     e.preventDefault();
   }
 
-  function onMapMouseMove(e: mapboxgl.MapMouseEvent) {
+  function onMapMouseMove(e: maplibregl.MapMouseEvent) {
     const id = draggingRef.current;
     if (!id) return;
     const ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
@@ -467,12 +471,12 @@ export default function GardenTwinBuilder() {
       type: "FeatureCollection",
       features: lawnRings.map((ring) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] } })),
     };
-    (map.getSource("lawn") as mapboxgl.GeoJSONSource)?.setData(lawnData);
+    (map.getSource("lawn") as maplibregl.GeoJSONSource)?.setData(lawnData);
     const exclData: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
       features: exclusions.map((ring) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] } })),
     };
-    (map.getSource("excl") as mapboxgl.GeoJSONSource)?.setData(exclData);
+    (map.getSource("excl") as maplibregl.GeoJSONSource)?.setData(exclData);
 
     const footData: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
     const ptData: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -483,8 +487,8 @@ export default function GardenTwinBuilder() {
       footData.features.push({ type: "Feature", properties: { id: object.id, color, selected: isSelected }, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] } });
       ptData.features.push({ type: "Feature", properties: { id: object.id, color, selected: isSelected, label: `${object.label} ${object.heightM.toFixed(1)}m` }, geometry: { type: "Point", coordinates: object.center } });
     }
-    (map.getSource("obj-foot") as mapboxgl.GeoJSONSource)?.setData(footData);
-    (map.getSource("obj-pt") as mapboxgl.GeoJSONSource)?.setData(ptData);
+    (map.getSource("obj-foot") as maplibregl.GeoJSONSource)?.setData(footData);
+    (map.getSource("obj-pt") as maplibregl.GeoJSONSource)?.setData(ptData);
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps

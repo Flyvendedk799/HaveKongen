@@ -423,25 +423,6 @@ async function fetchImageBytes(url: string, attempts = 2, timeoutMs = 6500): Pro
   throw new Error(last || "image fetch failed");
 }
 
-async function fetchMapboxFallbackImage(
-  bbox: [number, number, number, number],
-  width: number,
-  height: number,
-): Promise<Uint8Array | null> {
-  const token = Deno.env.get("MAPBOX_PUBLIC_TOKEN");
-  if (!token) return null;
-  const [minLng, minLat, maxLng, maxLat] = bbox;
-  const staticUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/`
-    + `[${minLng},${minLat},${maxLng},${maxLat}]/${width}x${height}`
-    + `?access_token=${encodeURIComponent(token)}`;
-  try {
-    return await fetchImageBytes(staticUrl, 1, 6500);
-  } catch (e) {
-    console.warn("mapbox fallback image failed", String(e));
-    return null;
-  }
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -543,12 +524,9 @@ Deno.serve(async (req: Request) => {
     try {
       imgBuf = await fetchImageBytes(wms, 1, 4500);
     } catch (e) {
-      console.warn("ortofoto crop failed, trying mapbox fallback", String(e));
-      const fallback = await fetchMapboxFallbackImage([minLng, minLat, maxLng, maxLat], width, height);
-      if (!fallback) {
-        return json({ error: "imagery_fetch_failed", detail: String(e) }, 502);
-      }
-      imgBuf = fallback;
+      // Ortofoto is the only imagery source; there is nothing to fall back to.
+      console.warn("ortofoto crop failed", String(e));
+      return json({ error: "imagery_fetch_failed", detail: String(e) }, 502);
     }
     let bin = "";
     const CHUNK = 0x8000;

@@ -73,17 +73,6 @@ export default function Account() {
   const [profileSync, setProfileSync] = useState<ProfileSync>(DEFAULT_PROFILE_SYNC);
   const [savingProfile, setSavingProfile] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState<string | null>(null);
-  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
-      if (!cancelled && !error && typeof data?.token === "string") setMapboxToken(data.token);
-    }).catch(() => {
-      /* Satellite thumbnails are best effort on account cards. */
-    });
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     if (!loading && !user) nav("/login?next=/konto");
@@ -414,7 +403,6 @@ export default function Account() {
                     }}>
                       <GardenThumbnailImage
                         garden={g}
-                        mapboxToken={mapboxToken}
                         alt={g.name}
                         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                       />

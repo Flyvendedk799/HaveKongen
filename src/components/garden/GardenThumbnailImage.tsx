@@ -4,7 +4,6 @@ import { gardenStaticSatelliteUrl, type GardenThumbnailSource } from "@/lib/gard
 
 type Props = {
   garden: GardenThumbnailSource & { name?: string | null };
-  mapboxToken: string | null;
   alt?: string;
   className?: string;
   style?: CSSProperties;
@@ -13,13 +12,12 @@ type Props = {
 
 export default function GardenThumbnailImage({
   garden,
-  mapboxToken,
   alt,
   className,
   style,
   fallback = null,
 }: Props) {
-  const staticUrl = useMemo(() => gardenStaticSatelliteUrl(garden, mapboxToken), [garden, mapboxToken]);
+  const staticUrl = useMemo(() => gardenStaticSatelliteUrl(garden), [garden]);
   const primaryUrl = garden.thumbnail_url || staticUrl;
   const [src, setSrc] = useState<string | null>(primaryUrl);
 

@@ -55,18 +55,8 @@ export default function MinHave() {
   const [events, setEvents] = useState<Event[]>([]);
   const [todayWeather, setTodayWeather] = useState<Weather | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
 
   useEffect(() => { document.title = "Min have — Havekongen"; }, []);
-  useEffect(() => {
-    let cancelled = false;
-    supabase.functions.invoke("get-mapbox-token").then(({ data, error }) => {
-      if (!cancelled && !error && typeof data?.token === "string") setMapboxToken(data.token);
-    }).catch(() => {
-      /* Satellite thumbnails are best effort in Min have. */
-    });
-    return () => { cancelled = true; };
-  }, []);
   useEffect(() => { if (!authLoading && !user) navigate("/login?next=/min-have"); }, [user, authLoading, navigate]);
 
   useEffect(() => {
@@ -284,7 +274,6 @@ export default function MinHave() {
                 }}>
                   <GardenThumbnailImage
                     garden={activeGarden}
-                    mapboxToken={mapboxToken}
                     alt={activeGarden.name}
                     style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     fallback={

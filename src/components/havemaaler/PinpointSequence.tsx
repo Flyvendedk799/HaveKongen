@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import mapboxgl from "mapbox-gl";
+import maplibregl from "maplibre-gl";
+import { ORTOFOTO_ATTRIBUTION } from "@/lib/ortofoto";
 import { useIsMobile } from "@/hooks/use-mobile";
 import "./pinpoint.css";
 
@@ -19,10 +20,14 @@ type Stage =
 type Props = {
   address: string;
   center: LngLat;
-  mapboxToken: string;
   ortoWmsTemplate: string | null;
   onDone: (camera: { center: LngLat; zoom: number }) => void;
 };
+
+// Ortofoto only covers Denmark, so the cinematic opens at a national scale rather
+// than on a globe — there is no world imagery layer to fly in from.
+const INTRO_ZOOM = 6.4;
+const GLOBE_ZOOM = 8.2;
 
 const STEPS: { id: string; label: string; stages: Stage[] }[] = [
   { id: "find",  label: "Finder adresse",   stages: ["intro", "globe"] },
@@ -109,14 +114,14 @@ function vibrateDevice(durationMs: number) {
   nav.vibrate?.(durationMs);
 }
 
-export default function PinpointSequence({ address, center, mapboxToken, ortoWmsTemplate, onDone }: Props) {
+export default function PinpointSequence({ address, center, ortoWmsTemplate, onDone }: Props) {
   const [stage, setStage] = useState<Stage>("intro");
   const [calmDown, setCalmDown] = useState(false); // start hiding HUD/atmosphere before map fade
   const [fadingOut, setFadingOut] = useState(false);
   const [pinPx, setPinPx] = useState<{ x: number; y: number } | null>(null);
   const [mapReady, setMapReady] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const timersRef = useRef<number[]>([]);
   const rafRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
@@ -142,33 +147,16 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     window.setTimeout(() => onDone(cam), 220 + 600);
   }
 
-  // Build dual-source style: satellite (global) + ortofoto (DK), zoom-cross-faded
-  function buildStyle(): mapboxgl.Style {
-    const sources: mapboxgl.Style["sources"] = {
-      sat: {
-        type: "raster",
-        tiles: [
-          `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`,
-        ],
-        tileSize: 256,
-        attribution: "© Mapbox",
-        maxzoom: 22,
-      },
-    };
-    // The source itself caps satellite at z19 so Mapbox does not request
-    // overzoomed/stretched tiles.
-    const layers: mapboxgl.AnyLayer[] = [
+  // Ortofoto over a flat ground colour. Tiles the proxy cannot serve (outside
+  // Denmark, or upstream hiccups) fall through to the background instead of a
+  // second imagery provider.
+  function buildStyle(): maplibregl.StyleSpecification {
+    const sources: maplibregl.StyleSpecification["sources"] = {};
+    const layers: maplibregl.LayerSpecification[] = [
       {
-        id: "sat-layer",
-        type: "raster",
-        source: "sat",
-        paint: {
-          // Keep satellite visible under the ortofoto proxy. If Dataforsyningen
-          // drops a tile, the proxy returns transparency and Mapbox still shows
-          // useful imagery instead of a blank square.
-          "raster-opacity": 1,
-          "raster-fade-duration": 300,
-        },
+        id: "ground",
+        type: "background",
+        paint: { "background-color": "#0f1f18" },
       },
     ];
     if (ortoWmsTemplate) {
@@ -176,17 +164,14 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
         type: "raster",
         tiles: [ortoWmsTemplate],
         tileSize: 512,
-        attribution: "© SDFE / Dataforsyningen",
+        attribution: ORTOFOTO_ATTRIBUTION,
       };
       layers.push({
         id: "orto-layer",
         type: "raster",
         source: "orto",
         paint: {
-          "raster-opacity": [
-            "interpolate", ["linear"], ["zoom"],
-            13, 0, 15.5, 0.88,
-          ],
+          "raster-opacity": 1,
           "raster-fade-duration": 300,
         },
       });
@@ -194,24 +179,23 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
     return { version: 8, sources, layers };
   }
 
-  // Mount Mapbox — deferred to next frame so the overlay paints first
+  // Mount the map — deferred to next frame so the overlay paints first
   // (eliminates the perceived freeze right after clicking the address)
   useEffect(() => {
-    if (!containerRef.current || !mapboxToken) return;
-    mapboxgl.accessToken = mapboxToken;
+    if (!containerRef.current) return;
 
-    let map: mapboxgl.Map | null = null;
+    let map: maplibregl.Map | null = null;
     let cancelled = false;
 
     // Double-RAF: wait for one paint of the overlay chrome before WebGL boot
     const raf1 = requestAnimationFrame(() => {
       const raf2 = requestAnimationFrame(() => {
         if (cancelled || !containerRef.current) return;
-        map = new mapboxgl.Map({
+        map = new maplibregl.Map({
           container: containerRef.current,
           style: buildStyle(),
           center,
-          zoom: 3.6,
+          zoom: INTRO_ZOOM,
           pitch: 0,
           bearing: 0,
           interactive: false,
@@ -235,12 +219,12 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
       try {
         map?.remove();
       } catch {
-        /* Mapbox can already be disposed during fast route changes. */
+        /* The map can already be disposed during fast route changes. */
       }
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapboxToken]);
+  }, []);
 
   // Project pin position to screen on every map move
   useEffect(() => {
@@ -297,7 +281,7 @@ export default function PinpointSequence({ address, center, mapboxToken, ortoWms
         // GLOBE — gentle drift + slight zoom
         setStage("globe");
         map.easeTo({
-          zoom: 6.5,
+          zoom: GLOBE_ZOOM,
           bearing: 6,
           duration: T.globeDur,
           easing: easeInOutCubic,
