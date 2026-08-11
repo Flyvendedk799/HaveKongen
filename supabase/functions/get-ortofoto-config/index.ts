@@ -22,8 +22,11 @@ function publicOrigin(req: Request): string | null {
 
   const forwardedHost = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (forwardedHost && !forwardedHost.startsWith("kong")) {
-    const proto = req.headers.get("x-forwarded-proto") ?? "https";
-    return `${proto}://${forwardedHost}`;
+    // The tunnel terminates TLS and forwards plain HTTP to Kong, so
+    // x-forwarded-proto says "http" for a request the browser made over HTTPS.
+    // Only a loopback host is genuinely not TLS.
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(forwardedHost);
+    return `${local ? "http" : "https"}://${forwardedHost}`;
   }
   return null;
 }
