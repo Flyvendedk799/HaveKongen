@@ -308,9 +308,9 @@
     border-radius: var(--r-md);
   }
   .canvas-host.topview { aspect-ratio: auto; }
-  .canvas-host .mapboxgl-ctrl-top-right { display: none; }
-  .canvas-host .mapboxgl-ctrl-bottom-right,
-  .canvas-host .mapboxgl-ctrl-bottom-left {
+  .canvas-host .maplibregl-ctrl-top-right { display: none; }
+  .canvas-host .maplibregl-ctrl-bottom-right,
+  .canvas-host .maplibregl-ctrl-bottom-left {
     bottom: 78px;
   }
   .canvas-host .help {
