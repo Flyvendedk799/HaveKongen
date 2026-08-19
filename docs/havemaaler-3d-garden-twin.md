@@ -31,6 +31,13 @@ the same `gardens.depth_model` contract described below, but via:
 - **Direct manipulation.** Ghost preview under the cursor while placing, drag
   anywhere on a footprint (mouse + touch), arrow-key nudge, `R` rotate, and undo
   history that only records real changes.
+- **On-map transform handles.** The selected object shows design-tool handles
+  (`transformHandlesFor` / `applyHandleDrag` in `src/lib/gardenBuilder.ts`):
+  corner/edge resize keeps the opposite side anchored, a rotate grip follows the
+  cursor with magnetic 0/45/90/135° snapping (Shift = exact 15° steps), and line
+  objects get draggable endpoints that re-derive length + direction from the
+  fixed far end. A live dimension/angle label shows at the object's center
+  during the drag. Mouse and touch alike.
 - **Saving keeps the user in the builder** and marks the flow's step 3 done;
   unsaved changes are guarded with a beforeunload prompt.
 
