@@ -5,6 +5,7 @@
 // helpers — so it can be unit tested without React or Mapbox.
 import type { LngLat, Ring } from "@/lib/havemaalerGeometry";
 import type { DepthObjectType } from "@/lib/gardenDepth";
+import type { DetectedObject } from "@/lib/gardenElevation";
 
 const METERS_PER_DEG = 111_320;
 
@@ -39,20 +40,26 @@ export type ObjectSpec = {
   /** Plausible height range for the slider, in metres. */
   heightRange: [number, number];
   hint: string;
+  /**
+   * How the object is placed on the map: "point" drops it with one click,
+   * "line" is drawn from A to B along its length (hedges, fences, walls) so
+   * the user never has to fiddle with a rotation slider.
+   */
+  placement: "point" | "line";
 };
 
 export const OBJECT_SPECS: Record<BuilderObjectType, ObjectSpec> = {
-  tree: { type: "tree", label: "Træ", widthM: 4, depthM: 4, heightM: 6, color: "#4f8a54", measurable: true, heightRange: [1.5, 25], hint: "Kronens bredde og højde. DHM måler ofte træhøjden automatisk." },
-  hedge: { type: "hedge", label: "Hæk", widthM: 4, depthM: 0.6, heightM: 1.6, color: "#315c3a", measurable: true, heightRange: [0.3, 4], hint: "Træk langs hækken. Højden bruges til læ og privatliv." },
-  shed: { type: "shed", label: "Skur", widthM: 3, depthM: 2.4, heightM: 2.3, color: "#9b7653", measurable: true, heightRange: [1.8, 5], hint: "Redskabsskur eller udhus." },
-  fence: { type: "fence", label: "Hegn", widthM: 4, depthM: 0.1, heightM: 1.6, color: "#c6a96d", measurable: false, heightRange: [0.4, 2.2], hint: "Plankeværk eller raftehegn langs skel." },
-  patio: { type: "patio", label: "Terrasse", widthM: 4, depthM: 3, heightM: 0.12, color: "#8a9295", measurable: false, heightRange: [0, 0.6], hint: "Fliser eller trædæk. Lav flade." },
-  bed: { type: "bed", label: "Bed", widthM: 2.5, depthM: 1.2, heightM: 0.3, color: "#7b5f45", measurable: false, heightRange: [0, 1], hint: "Stauder, køkkenhave eller blomsterbed." },
-  steps: { type: "steps", label: "Trappe", widthM: 1.6, depthM: 1.2, heightM: 0.6, color: "#d4c3a3", measurable: false, heightRange: [0.1, 2], hint: "Havetrappe eller niveauspring." },
-  retaining_wall: { type: "retaining_wall", label: "Støttemur", widthM: 3, depthM: 0.4, heightM: 0.8, color: "#9c8f7f", measurable: true, heightRange: [0.2, 2.5], hint: "Mur der holder på en skråning." },
-  water: { type: "water", label: "Vand", widthM: 2.5, depthM: 1.5, heightM: 0.1, color: "#4a8fb4", measurable: false, heightRange: [0, 0.4], hint: "Bassin, dam eller pool." },
-  furniture: { type: "furniture", label: "Havemøbler", widthM: 2, depthM: 1.2, heightM: 0.8, color: "#d88f4d", measurable: false, heightRange: [0.3, 1.6], hint: "Loungesæt, trampolin eller legehus." },
-  unknown_obstacle: { type: "unknown_obstacle", label: "Forhindring", widthM: 1.5, depthM: 1.5, heightM: 1, color: "#6c7180", measurable: false, heightRange: [0.2, 4], hint: "Andet fast objekt robotten skal udenom." },
+  tree: { type: "tree", label: "Træ", widthM: 4, depthM: 4, heightM: 6, color: "#4f8a54", measurable: true, heightRange: [1.5, 25], hint: "Kronens bredde og højde. DHM måler ofte træhøjden automatisk.", placement: "point" },
+  hedge: { type: "hedge", label: "Hæk", widthM: 4, depthM: 0.6, heightM: 1.6, color: "#315c3a", measurable: true, heightRange: [0.3, 4], hint: "Tegn hækken fra ende til ende. Højden bruges til læ og privatliv.", placement: "line" },
+  shed: { type: "shed", label: "Skur", widthM: 3, depthM: 2.4, heightM: 2.3, color: "#9b7653", measurable: true, heightRange: [1.8, 5], hint: "Redskabsskur eller udhus.", placement: "point" },
+  fence: { type: "fence", label: "Hegn", widthM: 4, depthM: 0.1, heightM: 1.6, color: "#c6a96d", measurable: false, heightRange: [0.4, 2.2], hint: "Tegn hegnet langs skellet — klik videre for hvert knæk.", placement: "line" },
+  patio: { type: "patio", label: "Terrasse", widthM: 4, depthM: 3, heightM: 0.12, color: "#8a9295", measurable: false, heightRange: [0, 0.6], hint: "Fliser eller trædæk. Lav flade.", placement: "point" },
+  bed: { type: "bed", label: "Bed", widthM: 2.5, depthM: 1.2, heightM: 0.3, color: "#7b5f45", measurable: false, heightRange: [0, 1], hint: "Stauder, køkkenhave eller blomsterbed.", placement: "point" },
+  steps: { type: "steps", label: "Trappe", widthM: 1.6, depthM: 1.2, heightM: 0.6, color: "#d4c3a3", measurable: false, heightRange: [0.1, 2], hint: "Havetrappe eller niveauspring.", placement: "point" },
+  retaining_wall: { type: "retaining_wall", label: "Støttemur", widthM: 3, depthM: 0.4, heightM: 0.8, color: "#9c8f7f", measurable: true, heightRange: [0.2, 2.5], hint: "Tegn muren langs skråningen.", placement: "line" },
+  water: { type: "water", label: "Vand", widthM: 2.5, depthM: 1.5, heightM: 0.1, color: "#4a8fb4", measurable: false, heightRange: [0, 0.4], hint: "Bassin, dam eller pool.", placement: "point" },
+  furniture: { type: "furniture", label: "Havemøbler", widthM: 2, depthM: 1.2, heightM: 0.8, color: "#d88f4d", measurable: false, heightRange: [0.3, 1.6], hint: "Loungesæt, trampolin eller legehus.", placement: "point" },
+  unknown_obstacle: { type: "unknown_obstacle", label: "Forhindring", widthM: 1.5, depthM: 1.5, heightM: 1, color: "#6c7180", measurable: false, heightRange: [0.2, 4], hint: "Andet fast objekt robotten skal udenom.", placement: "point" },
 };
 
 /** Palette order for the builder toolbar — most common first. */
@@ -64,6 +71,26 @@ function metersToLngLat(center: LngLat, dxMeters: number, dyMeters: number): Lng
   const lat = center[1] + dyMeters / METERS_PER_DEG;
   const lng = center[0] + dxMeters / (METERS_PER_DEG * Math.cos((center[1] * Math.PI) / 180));
   return [lng, lat];
+}
+
+/** Approximate ground distance between two lng/lat points, in metres. */
+export function metersBetween(a: LngLat, b: LngLat): number {
+  const midLat = (((a[1] + b[1]) / 2) * Math.PI) / 180;
+  const dx = (b[0] - a[0]) * METERS_PER_DEG * Math.cos(midLat);
+  const dy = (b[1] - a[1]) * METERS_PER_DEG;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Rotation (degrees, counter-clockwise from east — the same convention
+ * makeFootprint uses) of the segment from `a` to `b`, normalized to [0, 180).
+ */
+export function segmentRotationDeg(a: LngLat, b: LngLat): number {
+  const midLat = (((a[1] + b[1]) / 2) * Math.PI) / 180;
+  const dx = (b[0] - a[0]) * METERS_PER_DEG * Math.cos(midLat);
+  const dy = (b[1] - a[1]) * METERS_PER_DEG;
+  const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return ((deg % 180) + 180) % 180;
 }
 
 /** Axis-aligned-then-rotated rectangular footprint around a center point. */
@@ -114,6 +141,31 @@ export function confidenceForHeightSource(source: PlacedObject["heightSource"]):
   return 0.5;
 }
 
+/**
+ * Create a line-placed object (hedge, fence, wall…) drawn from `start` to `end`:
+ * length and rotation come straight from the segment, so the footprint hugs the
+ * drawn line instead of needing a rotation slider afterwards.
+ */
+export function createLinearObject(
+  type: BuilderObjectType,
+  start: LngLat,
+  end: LngLat,
+  overrides: Partial<Pick<PlacedObject, "depthM" | "heightM" | "label" | "id" | "heightSource" | "confidence">> = {},
+): PlacedObject {
+  const lengthM = Math.max(0.5, metersBetween(start, end));
+  const center: LngLat = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  return createPlacedObject(type, center, {
+    ...overrides,
+    widthM: Number(lengthM.toFixed(2)),
+    rotationDeg: Math.round(segmentRotationDeg(start, end)),
+  });
+}
+
+/** Move an object by a metre offset (east/north) — used for arrow-key nudging. */
+export function nudgeObject(object: PlacedObject, dxMeters: number, dyMeters: number): PlacedObject {
+  return { ...object, center: metersToLngLat(object.center, dxMeters, dyMeters) };
+}
+
 export function updatePlacedObject(object: PlacedObject, patch: Partial<PlacedObject>): PlacedObject {
   const next = { ...object, ...patch };
   if (patch.heightM != null && patch.heightSource == null) {
@@ -134,4 +186,75 @@ export function placedObjectFootprint(object: PlacedObject): Ring {
 export function clampHeight(type: BuilderObjectType, heightM: number): number {
   const [min, max] = OBJECT_SPECS[type].heightRange;
   return Number(Math.max(min, Math.min(max, heightM)).toFixed(2));
+}
+
+/**
+ * An auto-detected object waiting for the user's verdict. Detection results are
+ * never silently committed to the twin — truthful confidence means the user
+ * reviews each find and accepts or dismisses it.
+ */
+export type ObjectSuggestion = {
+  id: string;
+  type: BuilderObjectType;
+  center: LngLat;
+  widthM: number;
+  depthM: number;
+  heightM: number;
+  rotationDeg: number;
+  confidence: number;
+};
+
+let suggestionCounter = 0;
+
+/**
+ * Turn raw DHM detections into reviewable suggestions, dropping anything that
+ * overlaps an already-placed object, a suggestion still pending review, or a
+ * spot the user already dismissed (so re-running detection doesn't nag).
+ */
+export function suggestionsFromDetections(
+  detections: DetectedObject[],
+  existingObjects: PlacedObject[],
+  pendingSuggestions: ObjectSuggestion[],
+  dismissedCenters: LngLat[] = [],
+  minSeparationM = 1.5,
+): ObjectSuggestion[] {
+  const taken: LngLat[] = [
+    ...existingObjects.map((object) => object.center),
+    ...pendingSuggestions.map((suggestion) => suggestion.center),
+    ...dismissedCenters,
+  ];
+  const fresh: ObjectSuggestion[] = [];
+  for (const detection of detections) {
+    const tooClose = taken.some((center) => metersBetween(center, detection.center) < minSeparationM);
+    if (tooClose) continue;
+    taken.push(detection.center);
+    suggestionCounter += 1;
+    fresh.push({
+      id: `sug-${detection.type}-${suggestionCounter}`,
+      type: detection.type,
+      center: detection.center,
+      widthM: detection.widthM,
+      depthM: detection.depthM,
+      heightM: clampHeight(detection.type, detection.heightM),
+      rotationDeg: detection.rotationDeg ?? 0,
+      confidence: detection.confidence,
+    });
+  }
+  return fresh;
+}
+
+/** The accepted suggestion as a real, editable object with a DHM-measured height. */
+export function placedFromSuggestion(suggestion: ObjectSuggestion): PlacedObject {
+  return createPlacedObject(suggestion.type, suggestion.center, {
+    widthM: suggestion.widthM,
+    depthM: suggestion.depthM,
+    heightM: suggestion.heightM,
+    rotationDeg: suggestion.rotationDeg,
+    heightSource: "dhm_measured",
+    confidence: suggestion.confidence,
+  });
+}
+
+export function suggestionFootprint(suggestion: ObjectSuggestion): Ring {
+  return makeFootprint(suggestion.center, suggestion.widthM, suggestion.depthM, suggestion.rotationDeg);
 }

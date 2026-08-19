@@ -3,11 +3,18 @@ import * as turf from "@turf/turf";
 import {
   OBJECT_SPECS,
   clampHeight,
+  createLinearObject,
   createPlacedObject,
   makeFootprint,
+  metersBetween,
+  nudgeObject,
+  placedFromSuggestion,
   placedObjectFootprint,
+  segmentRotationDeg,
+  suggestionsFromDetections,
   updatePlacedObject,
 } from "@/lib/gardenBuilder";
+import type { DetectedObject } from "@/lib/gardenElevation";
 import {
   buildGardenTwinModel,
   inspectGardenDepthModel,
@@ -62,6 +69,72 @@ describe("gardenBuilder geometry", () => {
     expect(taller.heightSource).toBe("user");
     expect(clampHeight("hedge", 99)).toBe(OBJECT_SPECS.hedge.heightRange[1]);
     expect(clampHeight("hedge", -5)).toBe(OBJECT_SPECS.hedge.heightRange[0]);
+  });
+
+  it("marks hedges, fences and walls as line-placed", () => {
+    expect(OBJECT_SPECS.hedge.placement).toBe("line");
+    expect(OBJECT_SPECS.fence.placement).toBe("line");
+    expect(OBJECT_SPECS.retaining_wall.placement).toBe("line");
+    expect(OBJECT_SPECS.tree.placement).toBe("point");
+  });
+
+  it("creates linear objects with length and rotation from the drawn segment", () => {
+    const start: LngLat = [12.0, 55.0];
+    const eastM = 10 / (111_320 * Math.cos((55 * Math.PI) / 180));
+    const eastEnd: LngLat = [12.0 + eastM, 55.0];
+    const hedge = createLinearObject("hedge", start, eastEnd);
+    expect(hedge.widthM).toBeCloseTo(10, 1);
+    expect(hedge.rotationDeg).toBe(0);
+    expect(hedge.depthM).toBe(OBJECT_SPECS.hedge.depthM);
+    expect(hedge.center[0]).toBeCloseTo((start[0] + eastEnd[0]) / 2, 9);
+
+    const northEnd: LngLat = [12.0, 55.0 + 10 / 111_320];
+    const fence = createLinearObject("fence", start, northEnd);
+    expect(fence.rotationDeg).toBe(90);
+    expect(fence.widthM).toBeCloseTo(10, 1);
+
+    expect(segmentRotationDeg(start, eastEnd)).toBeCloseTo(0, 3);
+    expect(segmentRotationDeg(eastEnd, start)).toBeCloseTo(0, 3); // normalized to [0, 180)
+  });
+
+  it("nudges objects by metre offsets", () => {
+    const tree = createPlacedObject("tree", center);
+    const moved = nudgeObject(tree, 2, -3);
+    expect(metersBetween(tree.center, moved.center)).toBeCloseTo(Math.hypot(2, 3), 1);
+  });
+});
+
+describe("detection suggestions", () => {
+  const nearbyM = (origin: LngLat, dxM: number): LngLat => [origin[0] + dxM / (111_320 * Math.cos((origin[1] * Math.PI) / 180)), origin[1]];
+
+  it("skips detections that overlap placed objects, pending suggestions or dismissed spots", () => {
+    const existing = createPlacedObject("tree", center);
+    const dismissed = nearbyM(center, 30);
+    const detections: DetectedObject[] = [
+      { type: "tree", center: nearbyM(center, 0.5), widthM: 4, depthM: 4, heightM: 6, confidence: 0.8 }, // on the existing tree
+      { type: "tree", center: nearbyM(center, 30.4), widthM: 4, depthM: 4, heightM: 6, confidence: 0.8 }, // dismissed spot
+      { type: "hedge", center: nearbyM(center, 12), widthM: 6, depthM: 0.7, heightM: 1.8, rotationDeg: 40, confidence: 0.74 },
+    ];
+    const fresh = suggestionsFromDetections(detections, [existing], [], [dismissed]);
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0].type).toBe("hedge");
+    expect(fresh[0].rotationDeg).toBe(40);
+    const again = suggestionsFromDetections(detections, [existing], fresh, [dismissed]);
+    expect(again).toHaveLength(0); // pending suggestion blocks a re-find
+  });
+
+  it("accepted suggestions become DHM-measured placed objects", () => {
+    const [suggestion] = suggestionsFromDetections(
+      [{ type: "hedge", center, widthM: 7.5, depthM: 0.7, heightM: 1.9, rotationDeg: 130, confidence: 0.74 }],
+      [], [], [],
+    );
+    const placed = placedFromSuggestion(suggestion);
+    expect(placed.type).toBe("hedge");
+    expect(placed.widthM).toBe(7.5);
+    expect(placed.rotationDeg).toBe(130);
+    expect(placed.heightM).toBeCloseTo(1.9, 5);
+    expect(placed.heightSource).toBe("dhm_measured");
+    expect(placed.confidence).toBe(0.74);
   });
 });
 

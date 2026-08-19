@@ -255,8 +255,44 @@ export type DetectedObject = {
   widthM: number;
   depthM: number;
   heightM: number;
+  /** Footprint rotation, degrees CCW from east — matches gardenBuilder's makeFootprint. */
+  rotationDeg?: number;
   confidence: number;
 };
+
+/** Ray-cast point-in-polygon on lng/lat (ring without a closing point). */
+function pointInRing(point: LngLat, ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > point[1] !== yj > point[1]
+      && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Metres from a point to the nearest polygon edge (planar approximation).
+function distanceToRingM(point: LngLat, ring: Ring): number {
+  const midLat = (point[1] * Math.PI) / 180;
+  const mx = 111_320 * Math.cos(midLat);
+  const my = 111_320;
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const ax = (point[0] - a[0]) * mx;
+    const ay = (point[1] - a[1]) * my;
+    const bx = (b[0] - a[0]) * mx;
+    const by = (b[1] - a[1]) * my;
+    const lenSq = bx * bx + by * by;
+    const t = lenSq > 0 ? Math.max(0, Math.min(1, (ax * bx + ay * by) / lenSq)) : 0;
+    best = Math.min(best, Math.hypot(ax - bx * t, ay - by * t));
+  }
+  return best;
+}
 
 /**
  * Find candidate objects directly from the DHM surface model: cells where the
@@ -265,11 +301,22 @@ export type DetectedObject = {
  * "we found your trees" magic — the user only reviews and tweaks. Returns [] when
  * there's no surface grid. Conservative on purpose to avoid false positives
  * (big footprints like a house are skipped).
+ *
+ * Each cluster is measured along its principal axis, so a diagonal hedge is
+ * reported with its true length, width and rotation instead of an axis-aligned
+ * bounding box. Pass `boundary` (usually the drawn lawn/garden outline) to skip
+ * clusters outside the garden — the DHM grid covers the whole bounding box, so
+ * without it a neighbour's trees would be suggested too.
  */
-export function detectObjectsFromElevation(field: ElevationField, options: { maxObjects?: number; minHeightM?: number } = {}): DetectedObject[] {
+export function detectObjectsFromElevation(
+  field: ElevationField,
+  options: { maxObjects?: number; minHeightM?: number; boundary?: Ring; boundaryMarginM?: number } = {},
+): DetectedObject[] {
   if (!field.surface) return [];
   const minHeight = options.minHeightM ?? 0.8;
   const maxObjects = options.maxObjects ?? 16;
+  const boundary = options.boundary && options.boundary.length >= 3 ? options.boundary : null;
+  const boundaryMarginM = options.boundaryMarginM ?? 2;
   const { cols, rows, terrain, surface } = field;
   const { mPerCol, mPerRow } = cellMetrics(field);
   const cellAreaM2 = mPerCol * mPerRow;
@@ -323,51 +370,92 @@ export function detectObjectsFromElevation(field: ElevationField, options: { max
 
       const heights = cells.map(([r, c]) => surface[r][c] - terrain[r][c]);
       const medianHeight = median(heights);
-      const widthM = (maxC - minC + 1) * mPerCol;
-      const depthM = (maxR - minR + 1) * mPerRow;
       const fill = cells.length / Math.max(1, (maxC - minC + 1) * (maxR - minR + 1));
-      const longSide = Math.max(widthM, depthM);
-      const shortSide = Math.max(0.3, Math.min(widthM, depthM));
-      const aspect = longSide / shortSide;
 
-      const avgC = cells.reduce((s, [, c]) => s + c, 0) / cells.length;
-      const avgR = cells.reduce((s, [r]) => s + r, 0) / cells.length;
+      // Principal-axis measurement in local metres (x east, y north): mean,
+      // covariance, then extents along the principal and perpendicular axes.
+      const pts = cells.map(([r, c]) => ({ x: c * mPerCol, y: -r * mPerRow }));
+      const meanX = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const meanY = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      let sxx = 0;
+      let syy = 0;
+      let sxy = 0;
+      for (const p of pts) {
+        const dx = p.x - meanX;
+        const dy = p.y - meanY;
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+      }
+      const angleRad = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      const cosA = Math.cos(angleRad);
+      const sinA = Math.sin(angleRad);
+      let minAlong = Infinity;
+      let maxAlong = -Infinity;
+      let minAcross = Infinity;
+      let maxAcross = -Infinity;
+      for (const p of pts) {
+        const dx = p.x - meanX;
+        const dy = p.y - meanY;
+        const along = dx * cosA + dy * sinA;
+        const across = -dx * sinA + dy * cosA;
+        if (along < minAlong) minAlong = along;
+        if (along > maxAlong) maxAlong = along;
+        if (across < minAcross) minAcross = across;
+        if (across > maxAcross) maxAcross = across;
+      }
+      const cellPad = (mPerCol + mPerRow) / 2; // each cell has extent, not just its center
+      const lengthM = maxAlong - minAlong + cellPad;
+      const acrossM = Math.max(0.3, maxAcross - minAcross + cellPad);
+      const aspect = lengthM / acrossM;
+      const rotationDeg = Math.round((((angleRad * 180) / Math.PI) % 180 + 180) % 180);
+
+      const avgC = meanX / mPerCol;
+      const avgR = -meanY / mPerRow;
       const lng = minLng + (avgC / Math.max(1, cols - 1)) * (maxLng - minLng);
       const lat = maxLat - (avgR / Math.max(1, rows - 1)) * (maxLat - minLat);
+      const center: LngLat = [Number(lng.toFixed(7)), Number(lat.toFixed(7))];
+
+      // Keep only what stands in (or right at) the user's garden.
+      if (boundary && !pointInRing(center, boundary) && distanceToRingM(center, boundary) > boundaryMarginM) {
+        continue;
+      }
 
       let type: DetectedObjectType | null = null;
-      let outWidth = widthM;
-      let outDepth = depthM;
+      let outWidth = lengthM;
+      let outDepth = acrossM;
+      let outRotation: number | undefined = rotationDeg;
       let confidence = 0.7;
       if (aspect >= 2.2 && medianHeight >= 0.8 && medianHeight <= 4 && areaM2 <= 40) {
         type = "hedge";
-        outWidth = longSide;
-        outDepth = shortSide;
-        confidence = 0.72;
+        confidence = 0.74;
       } else if (aspect < 2.2 && medianHeight >= 3) {
         type = "tree";
-        const diameter = (widthM + depthM) / 2;
+        const diameter = (lengthM + acrossM) / 2;
         outWidth = diameter;
         outDepth = diameter;
+        outRotation = undefined;
         confidence = 0.78;
       } else if (aspect < 2.5 && medianHeight >= 1.8 && medianHeight <= 4.5 && fill >= 0.55 && areaM2 >= 3) {
         type = "shed";
         confidence = 0.7;
       } else if (aspect < 2.2 && medianHeight >= 2) {
         type = "tree";
-        const diameter = (widthM + depthM) / 2;
+        const diameter = (lengthM + acrossM) / 2;
         outWidth = diameter;
         outDepth = diameter;
+        outRotation = undefined;
         confidence = 0.7;
       }
       if (!type) continue;
 
       detections.push({
         type,
-        center: [Number(lng.toFixed(7)), Number(lat.toFixed(7))],
+        center,
         widthM: Number(Math.max(0.4, outWidth).toFixed(1)),
         depthM: Number(Math.max(0.3, outDepth).toFixed(1)),
         heightM: Number(Math.min(30, medianHeight).toFixed(1)),
+        rotationDeg: outRotation,
         confidence: Number(Math.min(0.88, confidence * (0.85 + field.confidence * 0.18)).toFixed(2)),
       });
     }

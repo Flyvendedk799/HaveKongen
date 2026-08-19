@@ -36,6 +36,8 @@ type Props = {
   model: GardenDepthModel | null;
   className?: string;
   compact?: boolean;
+  /** Object id to highlight (matches GardenDepthObject.id) — used by the builder. */
+  selectedId?: string | null;
 };
 
 type ViewerToggles = {
@@ -59,7 +61,7 @@ const OBJECT_COLORS: Record<string, number> = {
   unknown_obstacle: 0x6c7180,
 };
 
-export default function GardenTwinViewer({ model, className, compact = false }: Props) {
+export default function GardenTwinViewer({ model, className, compact = false, selectedId = null }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [toggles, setToggles] = useState<ViewerToggles>({
     objects: true,
@@ -144,7 +146,7 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
     model.captureReadiness.anchorSuggestions.forEach((anchor) => addAnchorMarker(scene, anchor.local, groundY));
 
     if (toggles.objects) {
-      model.objects.forEach((object) => addObject(scene, object, toggles, groundY));
+      model.objects.forEach((object) => addObject(scene, object, toggles, groundY, object.id === selectedId));
     }
     if (toggles.unknown) {
       model.terrain.unknownRegions.forEach((ring) => addUnknownRegion(scene, ring.map((point) => lngLatToLocal(point, model.center))));
@@ -187,7 +189,7 @@ export default function GardenTwinViewer({ model, className, compact = false }: 
       });
       renderer.domElement.remove();
     };
-  }, [model, toggles]);
+  }, [model, toggles, selectedId]);
 
   if (!model || !stats) {
     return (
@@ -316,7 +318,7 @@ function addTerrainMesh(scene: THREE.Scene, model: GardenDepthModel, groundY: (x
   scene.add(mesh);
 }
 
-function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: ViewerToggles, groundY: (x: number, z: number) => number) {
+function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: ViewerToggles, groundY: (x: number, z: number) => number, selected = false) {
   const bounds = boundsForPoints(object.localFootprint);
   if (!Number.isFinite(bounds.width) || bounds.width <= 0 || bounds.depth <= 0) return;
   const baseY = groundY(bounds.cx, bounds.cz);
@@ -324,7 +326,17 @@ function addObject(scene: THREE.Scene, object: GardenDepthObject, toggles: Viewe
     ? object.heightM ?? ((object.heightRangeM?.[0] ?? 0.4) + (object.heightRangeM?.[1] ?? 1.2)) / 2
     : 0.12;
   const color = OBJECT_COLORS[object.type] ?? OBJECT_COLORS.unknown_obstacle;
-  const opacity = toggles.confidence ? 0.34 + object.confidence * 0.55 : 0.82;
+  const opacity = selected ? 0.95 : toggles.confidence ? 0.34 + object.confidence * 0.55 : 0.82;
+  if (selected) {
+    const radius = Math.max(0.8, Math.max(bounds.width, bounds.depth) / 2 + 0.4);
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(radius, radius + 0.22, 32),
+      new THREE.MeshBasicMaterial({ color: 0xedc88b, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.set(bounds.cx, baseY + 0.06, bounds.cz);
+    scene.add(halo);
+  }
   if (object.type === "tree" && toggles.heights) {
     const trunkHeight = Math.max(0.7, height * 0.32);
     const canopyRadius = Math.max(0.65, Math.min(bounds.width, bounds.depth, height * 0.42));

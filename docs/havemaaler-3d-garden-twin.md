@@ -16,6 +16,24 @@ the same `gardens.depth_model` contract described below, but via:
 2. **Interactive object placement** (trees, hedges, sheds, terraces, beds, fences,
    water…) with editable heights — `src/lib/gardenBuilder.ts`.
 
+### Part 2 UX contract (2026-08-19)
+
+- **Detection suggests, the user decides.** `detectObjectsFromElevation`
+  (`src/lib/gardenElevation.ts`) measures DSM−DTM clusters along their principal
+  axis (so hedges get true length/width/rotation) and filters to the garden
+  boundary. Results become `ObjectSuggestion`s (`src/lib/gardenBuilder.ts`) shown
+  dashed on the map and in a review panel; nothing enters the twin until the user
+  accepts it (truthful confidence). Dismissed spots are remembered per session so
+  re-running detection doesn't nag.
+- **Line objects are drawn, not rotated.** Hedges, fences and retaining walls
+  have `placement: "line"`: click start, click end (chainable per knæk) —
+  length/rotation come from the segment via `createLinearObject`.
+- **Direct manipulation.** Ghost preview under the cursor while placing, drag
+  anywhere on a footprint (mouse + touch), arrow-key nudge, `R` rotate, and undo
+  history that only records real changes.
+- **Saving keeps the user in the builder** and marks the flow's step 3 done;
+  unsaved changes are guarded with a beforeunload prompt.
+
 The built model uses `alignment.mode = "elevation-model"`, object `source =
 "elevation_model"` (DHM-measured) or `"manual"`, and `terrain.elevation` holds the
 DHM grid. See `buildGardenTwinModel` in `src/lib/gardenDepth.ts`.
