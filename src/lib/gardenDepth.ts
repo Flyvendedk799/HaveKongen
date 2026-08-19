@@ -426,6 +426,8 @@ export function generateGardenDepthModel(input: GenerateDepthModelInput): Garden
 }
 
 export type GardenObjectInput = {
+  /** Stable builder id — preserved on the twin object so selection survives rebuilds. */
+  id?: string;
   type: DepthObjectType;
   label: string;
   footprint: Ring;
@@ -482,7 +484,7 @@ export function buildGardenTwinModel(input: BuildTwinInput): GardenDepthModel | 
     .map((object, index) => {
       const confidence = clamp01(object.confidence);
       return {
-        id: `built-${object.type}-${index + 1}`,
+        id: object.id ?? `built-${object.type}-${index + 1}`,
         type: object.type,
         label: object.label,
         footprint: object.footprint,

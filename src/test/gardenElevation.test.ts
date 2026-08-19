@@ -116,4 +116,45 @@ describe("gardenElevation", () => {
     // No surface model -> nothing to detect.
     expect(detectObjectsFromElevation({ ...f, surface: null })).toEqual([]);
   });
+
+  it("measures diagonal hedges along their principal axis with a rotation", () => {
+    const cols = 10;
+    const rows = 10;
+    const bbox: [number, number, number, number] = [12.0, 55.0, 12.000141, 55.0000808];
+    const terrain = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 10));
+    const surface = terrain.map((row) => [...row]);
+    // Diagonal NW->SE strip of 1.5m greenery: rows/cols 2..7.
+    for (let i = 2; i <= 7; i += 1) surface[i][i] = 11.5;
+    const f: ElevationField = { source: "dhm", cols, rows, bbox, terrain, surface, stats: elevationStatsFromGrid(terrain), resolutionM: 1, confidence: 0.85 };
+
+    const detected = detectObjectsFromElevation(f);
+    const hedge = detected.find((o) => o.type === "hedge");
+    expect(hedge).toBeTruthy();
+    expect(hedge!.widthM).toBeGreaterThan(6); // ~5*sqrt(2)+1 along the diagonal
+    expect(hedge!.depthM).toBeLessThan(2.5);
+    expect(hedge!.rotationDeg).toBeGreaterThan(125);
+    expect(hedge!.rotationDeg).toBeLessThan(145);
+  });
+
+  it("filters detections outside the garden boundary", () => {
+    const cols = 10;
+    const rows = 10;
+    const bbox: [number, number, number, number] = [12.0, 55.0, 12.000141, 55.0000808];
+    const terrain = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 10));
+    const surface = terrain.map((row) => [...row]);
+    for (let r = 4; r <= 6; r += 1) for (let c = 4; c <= 6; c += 1) surface[r][c] = 15; // tree inside
+    for (let c = 1; c <= 5; c += 1) surface[1][c] = 11.5; // hedge in the far north (outside)
+    const f: ElevationField = { source: "dhm", cols, rows, bbox, terrain, surface, stats: elevationStatsFromGrid(terrain), resolutionM: 1, confidence: 0.85 };
+
+    // Boundary rectangle around the tree only.
+    const boundary: Ring = [
+      [12.00005, 55.00002],
+      [12.00011, 55.00002],
+      [12.00011, 55.00005],
+      [12.00005, 55.00005],
+    ];
+    const detected = detectObjectsFromElevation(f, { boundary, boundaryMarginM: 0.5 });
+    expect(detected.some((o) => o.type === "tree")).toBe(true);
+    expect(detected.some((o) => o.type === "hedge")).toBe(false);
+  });
 });

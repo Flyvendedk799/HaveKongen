@@ -350,6 +350,255 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ============ HAVEMÅLER 3D BUILDER (Trin 2) ============ */
+/* Tool rows that sit below the map (outside .canvas-host) share the light
+   pill look of the primary actions. */
+.builder-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.builder-toolbar .tool-btn,
+.builder-palette .tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(20,39,29,0.14);
+  background: var(--paper);
+  color: var(--forest-800);
+  font-size: 12px;
+  transition: all 180ms;
+}
+.builder-toolbar .tool-btn:hover,
+.builder-palette .tool-btn:hover {
+  border-color: rgba(20,39,29,0.34);
+  background: rgba(20,39,29,0.04);
+  color: var(--forest-900);
+}
+.builder-toolbar .tool-btn.is-active,
+.builder-palette .tool-btn.is-active {
+  background: var(--gold-600);
+  border-color: var(--gold-600);
+  color: var(--forest-900);
+  font-weight: 700;
+}
+.builder-toolbar .tool-btn:disabled,
+.builder-palette .tool-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.builder-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(20,39,29,0.10);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.58);
+}
+.builder-palette-btn { border-radius: 10px !important; }
+.builder-palette-line-icon {
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+/* Step chips in the page head: Græsflade -> Byg i 3D -> Gem & brug */
+.builder-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  font-family: var(--sans);
+}
+.builder-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(20,39,29,0.14);
+  background: rgba(255,255,255,0.6);
+  color: var(--ink-500);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.builder-step .num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20,39,29,0.08);
+  color: var(--forest-800);
+  font-size: 11px;
+  font-weight: 700;
+}
+.builder-step.is-active {
+  border-color: var(--forest-800);
+  background: var(--forest-900);
+  color: var(--mist-25);
+}
+.builder-step.is-active .num { background: var(--gold-600); color: var(--forest-900); }
+.builder-step.is-done {
+  border-color: rgba(79,138,84,0.45);
+  color: var(--forest-800);
+}
+.builder-step.is-done .num { background: #4f8a54; color: #fff; }
+a.builder-step.is-done:hover { border-color: var(--forest-800); }
+.builder-step-arrow { color: var(--ink-300, rgba(20,39,29,0.3)); font-size: 12px; }
+
+/* Status banner on the map while DHM data loads / detection runs */
+.builder-scan-banner {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
+  background: rgba(12,26,19,0.72);
+  backdrop-filter: blur(10px);
+  color: var(--mist-25);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.spin { animation: builder-spin 1s linear infinite; }
+@keyframes builder-spin { to { transform: rotate(360deg); } }
+
+.builder-saved-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(79,138,84,0.4);
+  background: rgba(79,138,84,0.10);
+  color: var(--forest-800);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.builder-saved-note svg { color: #4f8a54; flex-shrink: 0; }
+
+/* Review panel for auto-detected objects */
+.suggestion-panel {
+  border: 1px solid rgba(198,169,109,0.55);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(237,200,139,0.16), rgba(255,255,255,0.55));
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.suggestion-panel__head {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.suggestion-panel__head svg { color: var(--gold-700); flex-shrink: 0; margin-top: 2px; }
+.suggestion-panel__head strong {
+  display: block;
+  font-size: 13px;
+  color: var(--forest-900);
+  line-height: 1.35;
+}
+.suggestion-panel__head span {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-500);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.suggestion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 150ms;
+}
+.suggestion-row:hover { background: rgba(255,255,255,0.7); }
+.suggestion-row.is-selected {
+  border-color: var(--gold-600);
+  background: rgba(255,255,255,0.85);
+}
+.suggestion-row > i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  outline: 1.5px dashed rgba(20,39,29,0.35);
+  outline-offset: 1.5px;
+}
+.suggestion-row .txt { flex: 1; min-width: 0; }
+.suggestion-row .txt strong { display: block; font-size: 12.5px; color: var(--forest-900); }
+.suggestion-row .txt span { display: block; font-size: 10.5px; color: var(--ink-500); }
+.suggestion-row .sug-accept,
+.suggestion-row .sug-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(20,39,29,0.14);
+  background: var(--paper);
+  transition: all 150ms;
+  flex-shrink: 0;
+}
+.suggestion-row .sug-accept { color: #3d7a44; }
+.suggestion-row .sug-accept:hover { background: #4f8a54; border-color: #4f8a54; color: #fff; }
+.suggestion-row .sug-dismiss { color: var(--ink-500); }
+.suggestion-row .sug-dismiss:hover { background: rgba(20,39,29,0.85); border-color: rgba(20,39,29,0.85); color: #fff; }
+.suggestion-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.suggestion-panel__actions button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(20,39,29,0.16);
+  background: var(--paper);
+  color: var(--forest-800);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: all 150ms;
+}
+.suggestion-panel__actions button:first-child {
+  background: var(--forest-900);
+  border-color: var(--forest-900);
+  color: var(--mist-25);
+}
+.suggestion-panel__actions button:first-child:hover { background: var(--forest-800); }
+.suggestion-panel__actions button:last-child:hover { border-color: rgba(20,39,29,0.4); }
 .hm-drawer,
 .garden-scan-readiness,
 .garden-scan-history {
