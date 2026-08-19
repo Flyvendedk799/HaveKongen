@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Leaf, MapPin, PawPrint, Ruler, Sprout } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
+import BirdListener from "@/components/companion/BirdListener";
 import WildlifeTab, { type FocusKey } from "@/components/companion/WildlifeTab";
 import type { WildlifeHabitat, WildlifeHabitat3DMode } from "@/components/companion/WildlifeHabitat3D";
 import type { ZonePlant } from "@/components/watering/PlantChips";
@@ -247,6 +248,8 @@ export default function GardenWildlife() {
             />
           </Suspense>
         </section>
+
+        <BirdListener userId={user.id} gardenId={garden.id} />
 
         <WildlifeTab zones={zones} plantsByZone={plantsByZone} focus={MODE_TO_FOCUS[mode]} />
       </div>

@@ -59,6 +59,65 @@ export type Database = {
         }
         Relationships: []
       }
+      animal_life_list: {
+        Row: {
+          confidence: string | null
+          created_at: string
+          first_observed_at: string
+          garden_id: string | null
+          id: string
+          kind: string
+          last_observed_at: string
+          latin: string | null
+          name_da: string
+          notes: string | null
+          observation_count: number
+          source: string
+          species_key: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: string | null
+          created_at?: string
+          first_observed_at?: string
+          garden_id?: string | null
+          id?: string
+          kind?: string
+          last_observed_at?: string
+          latin?: string | null
+          name_da: string
+          notes?: string | null
+          observation_count?: number
+          source?: string
+          species_key: string
+          user_id: string
+        }
+        Update: {
+          confidence?: string | null
+          created_at?: string
+          first_observed_at?: string
+          garden_id?: string | null
+          id?: string
+          kind?: string
+          last_observed_at?: string
+          latin?: string | null
+          name_da?: string
+          notes?: string | null
+          observation_count?: number
+          source?: string
+          species_key?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "animal_life_list_garden_id_fkey"
+            columns: ["garden_id"]
+            isOneToOne: false
+            referencedRelation: "gardens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_log: {
         Row: {
           action: string
