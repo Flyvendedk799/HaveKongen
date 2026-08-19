@@ -258,3 +258,157 @@ export function placedFromSuggestion(suggestion: ObjectSuggestion): PlacedObject
 export function suggestionFootprint(suggestion: ObjectSuggestion): Ring {
   return makeFootprint(suggestion.center, suggestion.widthM, suggestion.depthM, suggestion.rotationDeg);
 }
+
+// ---------------------------------------------------------------------------
+// On-map transform handles (design-tool style resize/rotate/reshape).
+//
+// Kinds are named in the OBJECT'S LOCAL frame: +u runs along the width axis
+// ("e"), +v along the depth axis ("n") — not compass directions. Point-placed
+// objects get 4 corners + 4 edges + a rotate grip; line-placed objects get two
+// endpoint grips (drag an end anywhere — length and direction follow, the other
+// end stays put) plus two thickness edges.
+// ---------------------------------------------------------------------------
+
+export type TransformHandleKind =
+  | "corner-ne" | "corner-nw" | "corner-se" | "corner-sw"
+  | "edge-e" | "edge-w" | "edge-n" | "edge-s"
+  | "end-a" | "end-b"
+  | "rotate";
+
+export type TransformHandle = { kind: TransformHandleKind; lngLat: LngLat };
+
+/** How far the rotate grip floats above the footprint's top edge, in metres. */
+export const ROTATE_HANDLE_OFFSET_M = 1.4;
+
+const MIN_WIDTH_M = 0.3;
+const MIN_DEPTH_M = 0.1;
+const MAX_SIZE_M = 60;
+
+function round2(value: number): number {
+  return Number(value.toFixed(2));
+}
+
+/** Object-local (u along width, v along depth) offset in metres -> lng/lat. */
+export function objectLocalToLngLat(object: PlacedObject, u: number, v: number): LngLat {
+  const a = (object.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  return metersToLngLat(object.center, u * cos - v * sin, u * sin + v * cos);
+}
+
+/** lng/lat -> object-local metres (inverse of objectLocalToLngLat). */
+export function lngLatToObjectLocal(object: PlacedObject, point: LngLat): { u: number; v: number } {
+  const latRad = (object.center[1] * Math.PI) / 180;
+  const east = (point[0] - object.center[0]) * METERS_PER_DEG * Math.cos(latRad);
+  const north = (point[1] - object.center[1]) * METERS_PER_DEG;
+  const a = (object.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  return { u: east * cos + north * sin, v: -east * sin + north * cos };
+}
+
+/** The grab handles to render for a selected object. */
+export function transformHandlesFor(object: PlacedObject): TransformHandle[] {
+  const hw = object.widthM / 2;
+  const hd = object.depthM / 2;
+  const at = (kind: TransformHandleKind, u: number, v: number): TransformHandle => ({ kind, lngLat: objectLocalToLngLat(object, u, v) });
+  if (OBJECT_SPECS[object.type].placement === "line") {
+    return [
+      at("end-a", -hw, 0),
+      at("end-b", hw, 0),
+      at("edge-n", 0, hd),
+      at("edge-s", 0, -hd),
+    ];
+  }
+  return [
+    at("corner-ne", hw, hd),
+    at("corner-nw", -hw, hd),
+    at("corner-sw", -hw, -hd),
+    at("corner-se", hw, -hd),
+    at("edge-e", hw, 0),
+    at("edge-w", -hw, 0),
+    at("edge-n", 0, hd),
+    at("edge-s", 0, -hd),
+    at("rotate", 0, hd + ROTATE_HANDLE_OFFSET_M),
+  ];
+}
+
+/**
+ * Apply a handle drag to the object, design-tool style:
+ * - edge/corner resize keeps the OPPOSITE edge/corner anchored (the footprint
+ *   grows toward the cursor instead of ballooning around the center);
+ * - the rotate grip follows the cursor angle, magnetically snapping to
+ *   0/45/90/135° (or exact 15° steps with `snap`, e.g. Shift held);
+ * - line endpoints re-derive length + direction from the fixed far end.
+ */
+export function applyHandleDrag(
+  object: PlacedObject,
+  kind: TransformHandleKind,
+  cursor: LngLat,
+  options: { snap?: boolean } = {},
+): PlacedObject {
+  if (kind === "rotate") {
+    const latRad = (object.center[1] * Math.PI) / 180;
+    const east = (cursor[0] - object.center[0]) * METERS_PER_DEG * Math.cos(latRad);
+    const north = (cursor[1] - object.center[1]) * METERS_PER_DEG;
+    if (Math.hypot(east, north) < 0.05) return object;
+    let deg = (Math.atan2(north, east) * 180) / Math.PI - 90;
+    deg = ((deg % 180) + 180) % 180;
+    if (options.snap) {
+      deg = (Math.round(deg / 15) * 15) % 180;
+    } else {
+      for (const cardinal of [0, 45, 90, 135, 180]) {
+        if (Math.abs(deg - cardinal) <= 4) { deg = cardinal % 180; break; }
+      }
+    }
+    return { ...object, rotationDeg: Math.round(deg) };
+  }
+
+  if (kind === "end-a" || kind === "end-b") {
+    const hw = object.widthM / 2;
+    const anchor = objectLocalToLngLat(object, kind === "end-a" ? hw : -hw, 0);
+    const lengthM = Math.min(MAX_SIZE_M * 2, Math.max(0.5, metersBetween(anchor, cursor)));
+    let rotationDeg = segmentRotationDeg(anchor, cursor);
+    if (options.snap) rotationDeg = (Math.round(rotationDeg / 15) * 15) % 180;
+    return {
+      ...object,
+      center: [(anchor[0] + cursor[0]) / 2, (anchor[1] + cursor[1]) / 2],
+      widthM: round2(lengthM),
+      rotationDeg: Math.round(rotationDeg),
+    };
+  }
+
+  const local = lngLatToObjectLocal(object, cursor);
+  let width = object.widthM;
+  let depth = object.depthM;
+  let du = 0;
+  let dv = 0;
+  const affectsE = kind === "edge-e" || kind === "corner-ne" || kind === "corner-se";
+  const affectsW = kind === "edge-w" || kind === "corner-nw" || kind === "corner-sw";
+  const affectsN = kind === "edge-n" || kind === "corner-ne" || kind === "corner-nw";
+  const affectsS = kind === "edge-s" || kind === "corner-se" || kind === "corner-sw";
+  if (affectsE) {
+    const anchor = -width / 2;
+    width = Math.min(MAX_SIZE_M, Math.max(MIN_WIDTH_M, local.u - anchor));
+    du = anchor + width / 2;
+  } else if (affectsW) {
+    const anchor = width / 2;
+    width = Math.min(MAX_SIZE_M, Math.max(MIN_WIDTH_M, anchor - local.u));
+    du = anchor - width / 2;
+  }
+  if (affectsN) {
+    const anchor = -depth / 2;
+    depth = Math.min(MAX_SIZE_M, Math.max(MIN_DEPTH_M, local.v - anchor));
+    dv = anchor + depth / 2;
+  } else if (affectsS) {
+    const anchor = depth / 2;
+    depth = Math.min(MAX_SIZE_M, Math.max(MIN_DEPTH_M, anchor - local.v));
+    dv = anchor - depth / 2;
+  }
+  return {
+    ...object,
+    center: objectLocalToLngLat(object, du, dv),
+    widthM: round2(width),
+    depthM: round2(depth),
+  };
+}

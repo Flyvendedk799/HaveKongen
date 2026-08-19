@@ -2,16 +2,19 @@ import { describe, expect, it } from "vitest";
 import * as turf from "@turf/turf";
 import {
   OBJECT_SPECS,
+  applyHandleDrag,
   clampHeight,
   createLinearObject,
   createPlacedObject,
   makeFootprint,
   metersBetween,
   nudgeObject,
+  objectLocalToLngLat,
   placedFromSuggestion,
   placedObjectFootprint,
   segmentRotationDeg,
   suggestionsFromDetections,
+  transformHandlesFor,
   updatePlacedObject,
 } from "@/lib/gardenBuilder";
 import type { DetectedObject } from "@/lib/gardenElevation";
@@ -172,5 +175,78 @@ describe("buildGardenTwinModel", () => {
 
   it("returns null without a lawn ring", () => {
     expect(buildGardenTwinModel({ center, lawnRings: [], objects: [] })).toBeNull();
+  });
+});
+
+describe("transform handles", () => {
+  it("gives point objects corners, edges and a rotate grip; line objects endpoints", () => {
+    const shed = createPlacedObject("shed", center);
+    const kinds = transformHandlesFor(shed).map((h) => h.kind);
+    expect(kinds).toHaveLength(9);
+    expect(kinds).toContain("corner-ne");
+    expect(kinds).toContain("edge-w");
+    expect(kinds).toContain("rotate");
+
+    const hedge = createPlacedObject("hedge", center);
+    const hedgeKinds = transformHandlesFor(hedge).map((h) => h.kind);
+    expect(hedgeKinds).toEqual(["end-a", "end-b", "edge-n", "edge-s"]);
+
+    const ne = transformHandlesFor(shed).find((h) => h.kind === "corner-ne")!;
+    expect(metersBetween(shed.center, ne.lngLat)).toBeCloseTo(Math.hypot(shed.widthM / 2, shed.depthM / 2), 1);
+  });
+
+  it("resizes from an edge with the opposite edge anchored", () => {
+    const shed = createPlacedObject("shed", center); // 3 x 2.4
+    const cursor = objectLocalToLngLat(shed, 3.5, 0); // drag east edge 2m further out
+    const resized = applyHandleDrag(shed, "edge-e", cursor);
+    expect(resized.widthM).toBeCloseTo(5, 1);
+    expect(resized.depthM).toBe(shed.depthM);
+    // Center moved half the growth toward the cursor; the west edge stayed put.
+    expect(metersBetween(shed.center, resized.center)).toBeCloseTo(1, 1);
+    const westBefore = objectLocalToLngLat(shed, -shed.widthM / 2, 0);
+    const westAfter = objectLocalToLngLat(resized, -resized.widthM / 2, 0);
+    expect(metersBetween(westBefore, westAfter)).toBeLessThan(0.05);
+  });
+
+  it("resizes both axes from a corner and clamps to minimum sizes", () => {
+    const shed = createPlacedObject("shed", center);
+    const corner = applyHandleDrag(shed, "corner-sw", objectLocalToLngLat(shed, -3, -2));
+    expect(corner.widthM).toBeCloseTo(4.5, 1);
+    expect(corner.depthM).toBeCloseTo(3.2, 1);
+    const neBefore = objectLocalToLngLat(shed, shed.widthM / 2, shed.depthM / 2);
+    const neAfter = objectLocalToLngLat(corner, corner.widthM / 2, corner.depthM / 2);
+    expect(metersBetween(neBefore, neAfter)).toBeLessThan(0.05); // opposite corner anchored
+
+    const collapsed = applyHandleDrag(shed, "edge-e", objectLocalToLngLat(shed, -10, 0));
+    expect(collapsed.widthM).toBeCloseTo(0.3, 2);
+  });
+
+  it("rotates toward the cursor and snaps near cardinal angles", () => {
+    const shed = createPlacedObject("shed", center);
+    const cursorAt = (deg: number): LngLat => {
+      const r = 3;
+      const latRad = (center[1] * Math.PI) / 180;
+      return [
+        center[0] + (r * Math.cos((deg * Math.PI) / 180)) / (111_320 * Math.cos(latRad)),
+        center[1] + (r * Math.sin((deg * Math.PI) / 180)) / 111_320,
+      ];
+    };
+    // The grip sits 90° ahead of the rotation, so a cursor at 120° means 30°.
+    expect(applyHandleDrag(shed, "rotate", cursorAt(120)).rotationDeg).toBe(30);
+    expect(applyHandleDrag(shed, "rotate", cursorAt(133)).rotationDeg).toBe(45); // magnetic snap (43° -> 45°)
+    expect(applyHandleDrag(shed, "rotate", cursorAt(127), { snap: true }).rotationDeg).toBe(30); // 15° steps
+  });
+
+  it("drags a line endpoint while the far end stays fixed", () => {
+    const start: LngLat = [12.0, 55.0];
+    const eastM = 10 / (111_320 * Math.cos((55 * Math.PI) / 180));
+    const hedge = createLinearObject("hedge", start, [12.0 + eastM, 55.0]); // 10m, rotation 0
+    const anchor = objectLocalToLngLat(hedge, -hedge.widthM / 2, 0); // end-a
+    const cursor: LngLat = [anchor[0], anchor[1] + 6 / 111_320]; // 6m due north of end-a
+    const dragged = applyHandleDrag(hedge, "end-b", cursor);
+    expect(dragged.widthM).toBeCloseTo(6, 1);
+    expect(dragged.rotationDeg).toBe(90);
+    const endAAfter = transformHandlesFor(dragged).find((h) => h.kind === "end-a")!;
+    expect(metersBetween(anchor, endAAfter.lngLat)).toBeLessThan(0.05);
   });
 });

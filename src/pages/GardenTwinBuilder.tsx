@@ -58,6 +58,7 @@ import {
 import {
   BUILDER_PALETTE,
   OBJECT_SPECS,
+  applyHandleDrag,
   clampHeight,
   createLinearObject,
   createPlacedObject,
@@ -69,10 +70,12 @@ import {
   segmentRotationDeg,
   suggestionFootprint,
   suggestionsFromDetections,
+  transformHandlesFor,
   updatePlacedObject,
   type BuilderObjectType,
   type ObjectSuggestion,
   type PlacedObject,
+  type TransformHandleKind,
 } from "@/lib/gardenBuilder";
 
 type SavedGarden = Pick<Tables<"gardens">, "id" | "name" | "address" | "latitude" | "longitude" | "area_m2" | "polygon" | "exclusions" | "imagery_source" | "depth_model">;
@@ -159,10 +162,14 @@ export default function GardenTwinBuilder() {
 
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  // Bumped when a handle drag ends, so the map re-syncs without an object change.
+  const [handleTick, setHandleTick] = useState(0);
 
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<string | null>(null);
+  // Active transform-handle drag (resize/rotate/endpoint) on the selected object.
+  const transformRef = useRef<{ id: string; kind: TransformHandleKind } | null>(null);
   // Snapshot lazily on the first real move, so a plain click-to-select never
   // pollutes undo history; suppress the click that follows a finished drag.
   const dragMovedRef = useRef(false);
@@ -359,6 +366,10 @@ export default function GardenTwinBuilder() {
       if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 70, maxZoom: 20.2, duration: 0 });
     });
     map.on("click", onMapClick);
+    // Handle listeners are registered before the object listeners so a grab on
+    // a handle that overlaps the footprint wins.
+    map.on("mousedown", "handle-pt", onHandlePointerDown);
+    map.on("touchstart", "handle-pt", onHandlePointerDown);
     map.on("mousedown", "obj-pt-circle", onObjectPointerDown);
     map.on("mousedown", "obj-foot-fill", onObjectPointerDown);
     map.on("touchstart", "obj-pt-circle", onObjectPointerDown);
@@ -370,7 +381,7 @@ export default function GardenTwinBuilder() {
     map.on("touchcancel", endDrag);
     map.on("mouseout", () => updateGhost(null));
     const canvas = map.getCanvas();
-    const hoverOn = () => { if (!stateRef.current.placingType && !draggingRef.current) canvas.style.cursor = "move"; };
+    const hoverOn = () => { if (!stateRef.current.placingType && !draggingRef.current && !transformRef.current) canvas.style.cursor = "move"; };
     const hoverOff = () => { canvas.style.cursor = stateRef.current.placingType ? "crosshair" : ""; };
     map.on("mouseenter", "obj-foot-fill", hoverOn);
     map.on("mouseleave", "obj-foot-fill", hoverOff);
@@ -378,6 +389,16 @@ export default function GardenTwinBuilder() {
     map.on("mouseleave", "obj-pt-circle", hoverOff);
     map.on("mouseenter", "sug-fill", () => { if (!stateRef.current.placingType) canvas.style.cursor = "pointer"; });
     map.on("mouseleave", "sug-fill", hoverOff);
+    map.on("mouseenter", "handle-pt", (e) => {
+      if (stateRef.current.placingType) return;
+      const kind = e.features?.[0]?.properties?.kind as TransformHandleKind | undefined;
+      canvas.style.cursor = kind === "rotate" ? "grab"
+        : kind === "end-a" || kind === "end-b" ? "move"
+        : kind === "edge-e" || kind === "edge-w" ? "ew-resize"
+        : kind === "edge-n" || kind === "edge-s" ? "ns-resize"
+        : "nwse-resize";
+    });
+    map.on("mouseleave", "handle-pt", hoverOff);
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, ortoCfg]);
@@ -433,6 +454,44 @@ export default function GardenTwinBuilder() {
         source: "obj-pt",
         layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"] },
         paint: { "text-color": "#fff7e0", "text-halo-color": "#14271d", "text-halo-width": 1.4 },
+      });
+    }
+    // Transform handles for the selected object (rendered above everything).
+    if (!map.getSource("handles")) {
+      map.addSource("handles", { type: "geojson", data: empty });
+      map.addLayer({
+        id: "handle-connector",
+        type: "line",
+        source: "handles",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#fff0a8", "line-width": 1.4, "line-dasharray": [1.2, 1.2] },
+      });
+      map.addLayer({
+        id: "handle-pt",
+        type: "circle",
+        source: "handles",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["!=", ["get", "kind"], "label"]],
+        paint: {
+          "circle-radius": ["match", ["get", "role"], "rotate", 7, "end", 7, "corner", 6, 5],
+          "circle-color": ["match", ["get", "role"], "rotate", "#edc88b", "end", "#edc88b", "#ffffff"],
+          "circle-stroke-color": "#14271d",
+          "circle-stroke-width": 2,
+        },
+      });
+      map.addLayer({
+        id: "handle-label",
+        type: "symbol",
+        source: "handles",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["==", ["get", "kind"], "label"]],
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 13,
+          "text-offset": [0, -1.4],
+          "text-anchor": "bottom",
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+        },
+        paint: { "text-color": "#fff7e0", "text-halo-color": "#14271d", "text-halo-width": 1.6 },
       });
     }
     // Live preview of the object about to be placed (follows the cursor).
@@ -552,6 +611,8 @@ export default function GardenTwinBuilder() {
       placeObject(s.placingType, ll);
       return;
     }
+    // A click on a handle (grab without moving) must not change the selection.
+    if (map.getLayer("handle-pt") && map.queryRenderedFeatures(e.point, { layers: ["handle-pt"] }).length) return;
     const sugId = queryIds(map, e.point, ["sug-fill"]);
     if (sugId) {
       setSelectedSuggestionId(sugId);
@@ -563,9 +624,33 @@ export default function GardenTwinBuilder() {
     setSelectedSuggestionId(null);
   }
 
+  function onHandlePointerDown(e: maplibregl.MapLayerMouseEvent | maplibregl.MapLayerTouchEvent) {
+    const map = mapRef.current!;
+    if (stateRef.current.placingType || draggingRef.current || transformRef.current) return;
+    const id = stateRef.current.selectedId;
+    const kind = e.features?.[0]?.properties?.kind as TransformHandleKind | undefined;
+    if (!id || !kind) return;
+    transformRef.current = { id, kind };
+    dragMovedRef.current = false;
+    map.dragPan.disable();
+    e.preventDefault();
+  }
+
+  function applyTransform(ll: LngLat, snap: boolean) {
+    const transform = transformRef.current;
+    if (!transform) return;
+    if (!dragMovedRef.current) {
+      dragMovedRef.current = true;
+      snapshot(); // one undo step restores the pre-transform shape
+    }
+    setObjects((prev) => prev.map((object) => object.id === transform.id
+      ? applyHandleDrag(object, transform.kind, ll, { snap })
+      : object));
+  }
+
   function onObjectPointerDown(e: maplibregl.MapLayerMouseEvent | maplibregl.MapLayerTouchEvent) {
     const map = mapRef.current!;
-    if (stateRef.current.placingType || draggingRef.current) return;
+    if (stateRef.current.placingType || draggingRef.current || transformRef.current) return;
     const id = (e.features ?? []).map((f) => f.properties?.id).find((value): value is string => typeof value === "string");
     if (!id) return;
     draggingRef.current = id;
@@ -586,6 +671,10 @@ export default function GardenTwinBuilder() {
 
   function onMapMouseMove(e: maplibregl.MapMouseEvent) {
     const ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
+    if (transformRef.current) {
+      applyTransform(ll, e.originalEvent.shiftKey);
+      return;
+    }
     const id = draggingRef.current;
     if (id) {
       moveDragged(id, ll);
@@ -595,6 +684,11 @@ export default function GardenTwinBuilder() {
   }
 
   function onMapTouchMove(e: maplibregl.MapTouchEvent) {
+    if (transformRef.current) {
+      e.preventDefault();
+      applyTransform([e.lngLat.lng, e.lngLat.lat], false);
+      return;
+    }
     const id = draggingRef.current;
     if (!id) return;
     e.preventDefault();
@@ -602,8 +696,9 @@ export default function GardenTwinBuilder() {
   }
 
   function endDrag() {
-    if (!draggingRef.current) return;
+    if (!draggingRef.current && !transformRef.current) return;
     draggingRef.current = null;
+    transformRef.current = null;
     if (dragMovedRef.current) {
       // The mouseup that ends a drag also fires a click — don't let it change selection.
       suppressClickRef.current = true;
@@ -615,6 +710,7 @@ export default function GardenTwinBuilder() {
       map.dragPan.enable();
       map.getCanvas().style.cursor = stateRef.current.placingType ? "crosshair" : "";
     }
+    setHandleTick((t) => t + 1); // re-sync so the live dimension label disappears
   }
 
   function placeObject(type: BuilderObjectType, ll: LngLat) {
@@ -760,10 +856,39 @@ export default function GardenTwinBuilder() {
       sugData.features.push({ type: "Feature", properties: { id: suggestion.id, selected: isSelected, label: `${OBJECT_SPECS[suggestion.type].label}? ${suggestion.heightM.toFixed(1)}m` }, geometry: { type: "Point", coordinates: suggestion.center } });
     }
     (map.getSource("sug") as maplibregl.GeoJSONSource)?.setData(sugData);
+
+    // Transform handles on the selected object (hidden while placing).
+    const handleData: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const sel = objects.find((object) => object.id === selectedId);
+    if (sel && !placingType) {
+      const handles = transformHandlesFor(sel);
+      for (const handle of handles) {
+        const role = handle.kind === "rotate" ? "rotate"
+          : handle.kind.startsWith("end") ? "end"
+          : handle.kind.startsWith("corner") ? "corner"
+          : "edge";
+        handleData.features.push({ type: "Feature", properties: { kind: handle.kind, role }, geometry: { type: "Point", coordinates: handle.lngLat } });
+      }
+      const rotate = handles.find((h) => h.kind === "rotate");
+      const top = handles.find((h) => h.kind === "edge-n");
+      if (rotate && top) {
+        handleData.features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [top.lngLat, rotate.lngLat] } });
+      }
+      const transform = transformRef.current;
+      if (transform && transform.id === sel.id && dragMovedRef.current) {
+        const label = transform.kind === "rotate"
+          ? `${Math.round(sel.rotationDeg)}°`
+          : OBJECT_SPECS[sel.type].placement === "line" && transform.kind.startsWith("end")
+            ? `${sel.widthM.toFixed(1)} m`
+            : `${sel.widthM.toFixed(1)} × ${sel.depthM.toFixed(1)} m`;
+        handleData.features.push({ type: "Feature", properties: { kind: "label", label }, geometry: { type: "Point", coordinates: sel.center } });
+      }
+    }
+    (map.getSource("handles") as maplibregl.GeoJSONSource)?.setData(handleData);
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { syncMap(); }, [objects, selectedId, lawnRings, exclusions, suggestions, selectedSuggestionId, view]);
+  useEffect(() => { syncMap(); }, [objects, selectedId, lawnRings, exclusions, suggestions, selectedSuggestionId, view, placingType, handleTick]);
 
   // ----- Keyboard shortcuts -----
   useEffect(() => {
@@ -897,7 +1022,11 @@ export default function GardenTwinBuilder() {
       return `Klik på kortet for at placere ${spec.label.toLowerCase()}. Esc for at stoppe.`;
     }
     if (selectedSuggestion) return "Godkend eller afvis det stiplede forslag i panelet — A godkender, X afviser.";
-    if (selected) return "Træk objektet for at flytte. R drejer · piletaster finjusterer · Delete fjerner.";
+    if (selected) {
+      return OBJECT_SPECS[selected.type].placement === "line"
+        ? "Træk i enderne for at forlænge eller dreje. Træk i siderne for bredden. Træk midten for at flytte."
+        : "Træk i hjørner og kanter for størrelsen, den gyldne prik drejer. Træk objektet for at flytte.";
+    }
     if (suggestions.length) return "Stiplede felter er automatiske fund — klik på et for at godkende eller afvise.";
     return "Klik et objekt for at redigere, eller vælg en type nedenfor og klik på kortet.";
   }
@@ -1134,7 +1263,10 @@ export default function GardenTwinBuilder() {
                       </span>
                     </div>
                     <p style={{ fontSize: 10.5, color: "var(--ink-500)", marginTop: 10, lineHeight: 1.6 }}>
-                      Træk objektet på kortet for at flytte · <strong>R</strong> drejer · piletaster finjusterer · <strong>D</strong> dublerer.
+                      {OBJECT_SPECS[selected.type].placement === "line"
+                        ? <>Træk i <strong>enderne</strong> på kortet for længde og retning, i siderne for bredden.</>
+                        : <>Træk i <strong>hjørner/kanter</strong> for størrelse, den <strong>gyldne prik</strong> drejer (Shift = 15°-trin).</>}
+                      {" "}Piletaster finjusterer · <strong>R</strong> drejer · <strong>D</strong> dublerer.
                     </p>
                   </div>
                 ) : (
@@ -1148,7 +1280,7 @@ export default function GardenTwinBuilder() {
                     <ol style={{ fontSize: 12.5, color: "var(--ink-500)", lineHeight: 1.7, paddingLeft: 18, margin: "8px 0 0" }}>
                       <li><strong>Godkend</strong> de objekter, vi finder automatisk — de vises stiplede på kortet.</li>
                       <li><strong>Tilføj flere</strong>: vælg en type og klik på kortet. Hække og hegn ({<PenLine size={10} style={{ display: "inline" }} />}) tegner du fra ende til ende.</li>
-                      <li><strong>Justér</strong>: træk for at flytte, R drejer, højden hentes fra DHM hvor den kan måles.</li>
+                      <li><strong>Justér</strong>: træk i hjørnerne for størrelse, den gyldne prik drejer. Højden hentes fra DHM hvor den kan måles.</li>
                       <li><strong>Se i 3D</strong> og gem — Havekompagnon, vanding og robotguide bruger modellen.</li>
                     </ol>
                     {detectionRan && !suggestions.length && !objects.length && (
