@@ -53,3 +53,14 @@ port = 55424
 
 [analytics]
 enabled = false
+
+[auth]
+# A local Supabase stack otherwise signs every JWT with the Supabase CLI's
+# PUBLISHED demo secret, so anyone can forge a service_role token and read/write
+# straight past RLS — and havekongen.dk routes /auth and /rest to this stack, so
+# that was reachable from the internet. ServerHoster exports the real
+# SUPABASE_AUTH_JWT_SECRET from /root/.survhub/survhub.env into every
+# `supabase start`; the CLI resolves env(...) from the process environment.
+# Never drop this line — a stack that starts without it is back on the public
+# demo secret.
+jwt_secret = "env(SUPABASE_AUTH_JWT_SECRET)"
