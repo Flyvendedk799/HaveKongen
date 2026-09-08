@@ -25,7 +25,6 @@ const CartPage = lazy(() => import("./pages/CartPage.tsx"));
 const AuthPage = lazy(() => import("./pages/AuthPage.tsx"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword.tsx"));
 const GardenSizer = lazy(() => import("./pages/GardenSizer.tsx"));
-const GardenMobileScan = lazy(() => import("./pages/GardenMobileScan.tsx"));
 const GardenTwinBuilder = lazy(() => import("./pages/GardenTwinBuilder.tsx"));
 const GardenCompanion = lazy(() => import("./pages/GardenCompanion.tsx"));
 const GardenWildlife = lazy(() => import("./pages/GardenWildlife.tsx"));
