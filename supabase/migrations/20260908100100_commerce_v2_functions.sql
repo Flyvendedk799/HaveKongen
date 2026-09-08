@@ -871,27 +871,53 @@ stable
 security definer
 set search_path = public
 as $fn$
-  with q as (select websearch_to_tsquery('danish', coalesce(nullif(trim(p_q), ''), 'zzzz')) as tsq,
-                    '%' || lower(coalesce(trim(p_q), '')) || '%' as like_q)
-  select 'product'::text, p.id::text, p.slug, p.name, p.short_description, p.category,
-         p.base_price_dkk, p.image_url, p.gradient,
-         ts_rank(to_tsvector('danish', coalesce(p.name,'') || ' ' || coalesce(p.short_description,'') || ' ' ||
-                 coalesce(p.description,'') || ' ' || coalesce(p.category,'')), q.tsq) + 0.5
-    from public.products p, q
-   where p.active
-     and (to_tsvector('danish', coalesce(p.name,'') || ' ' || coalesce(p.short_description,'') || ' ' ||
-          coalesce(p.description,'') || ' ' || coalesce(p.category,'')) @@ q.tsq
-          or lower(p.name) like q.like_q)
-  union all
-  select 'plant'::text, c.slug, c.slug, c.name_da, c.latin, coalesce(c.category, 'plante'),
-         null::int, c.image_url, null::text,
-         ts_rank(to_tsvector('danish', coalesce(c.name_da,'') || ' ' || coalesce(c.latin,'')), q.tsq)
-    from public.plants_catalog c, q
-   where to_tsvector('danish', coalesce(c.name_da,'') || ' ' || coalesce(c.latin,'')) @@ q.tsq
-      or lower(c.name_da) like q.like_q
-      or lower(coalesce(c.latin,'')) like q.like_q
-  order by rank desc, title
-  limit greatest(1, least(coalesce(p_limit, 12), 50))
+  -- The two halves are ordered together, so they are unioned inside a subquery
+  -- and sorted outside it: ORDER BY cannot see an output-column name across a
+  -- UNION, only the names of the first branch.
+  with q as (
+    select websearch_to_tsquery('danish', coalesce(nullif(trim(p_q), ''), 'zzzz')) as tsq,
+           '%' || lower(coalesce(trim(p_q), '')) || '%' as like_q
+  ),
+  hits as (
+    -- Products carry a +0.5 floor so a matching product outranks a plant of
+    -- similar textual relevance; this is a shop first.
+    select 'product'::text as kind,
+           p.id::text as id,
+           p.slug as slug,
+           p.name as title,
+           p.short_description as subtitle,
+           p.category as category,
+           p.base_price_dkk as price_dkk,
+           p.image_url as image_url,
+           p.gradient as gradient,
+           (ts_rank(to_tsvector('danish', coalesce(p.name,'') || ' ' || coalesce(p.short_description,'') || ' ' ||
+                    coalesce(p.description,'') || ' ' || coalesce(p.category,'')), q.tsq) + 0.5)::real as rank
+      from public.products p, q
+     where p.active
+       and (to_tsvector('danish', coalesce(p.name,'') || ' ' || coalesce(p.short_description,'') || ' ' ||
+            coalesce(p.description,'') || ' ' || coalesce(p.category,'')) @@ q.tsq
+            or lower(p.name) like q.like_q)
+    union all
+    select 'plant'::text,
+           c.slug,
+           c.slug,
+           c.name_da,
+           c.latin,
+           coalesce(c.category, 'plante'),
+           null::int,
+           c.image_url,
+           null::text,
+           ts_rank(to_tsvector('danish', coalesce(c.name_da,'') || ' ' || coalesce(c.latin,'')), q.tsq)::real
+      from public.plants_catalog c, q
+     where to_tsvector('danish', coalesce(c.name_da,'') || ' ' || coalesce(c.latin,'')) @@ q.tsq
+        or lower(c.name_da) like q.like_q
+        or lower(coalesce(c.latin,'')) like q.like_q
+  )
+  select hits.kind, hits.id, hits.slug, hits.title, hits.subtitle, hits.category,
+         hits.price_dkk, hits.image_url, hits.gradient, hits.rank
+    from hits
+   order by hits.rank desc, hits.title
+   limit greatest(1, least(coalesce(p_limit, 12), 50))
 $fn$;
 
 -- ------------------------------------------------------------------ grants --
