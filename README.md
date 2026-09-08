@@ -39,6 +39,7 @@ npm run dev               # http://localhost:8080
 | `npm run typecheck` | `tsc --noEmit` over the app |
 | `npm run lint` | ESLint (see *Lint baseline* below) |
 | `npm run test` | Vitest, single run |
+| `npm run check:functions` | Syntax-check the Deno edge functions (tsc does not) |
 | `npm run test:watch` | Vitest in watch mode |
 | `node scripts/generate-sitemap.mjs` | Rebuild `public/sitemap.xml` including product pages |
 
@@ -66,7 +67,7 @@ Edge function secrets (set with `supabase secrets set`):
 | --- | --- | --- |
 | `OPENAI_API_KEY` | every AI function | those functions return 500 |
 | `DATAFORSYNINGEN_TOKEN` | maps, cadastre, elevation | Havemåler cannot load imagery |
-| `ALLOWED_ORIGINS` | CORS allowlist | falls back to the havekongen.dk domains plus localhost |
+| `ALLOWED_ORIGINS` | CORS allowlist | **the allowlist is off** — every origin is accepted, and the function logs a warning |
 | `RESEND_API_KEY` | order emails | emails are logged and skipped, orders still work |
 | `EMAIL_FROM`, `EMAIL_REPLY_TO`, `SITE_URL` | email formatting | sensible defaults |
 | `STRIPE_SECRET_KEY` | card payment | card option returns "not enabled"; bank transfer still works |
@@ -145,7 +146,8 @@ guessing. Cancelling restocks; so does marking a return as received.
 ## Testing
 
 ```bash
-npm run test        # 130 unit tests
+npm run test              # 136 unit tests
+npm run check:functions   # the edge functions tsc never sees
 ```
 
 The interesting half runs in CI: `.github/workflows/ci.yml` applies every
