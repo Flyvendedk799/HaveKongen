@@ -1,14 +1,19 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
 User-agent: *
 Allow: /
+
+# Private or transactional pages. Nothing here is useful in a search result,
+# and an indexed order page would be a privacy problem rather than a ranking
+# one. The app also sends noindex on these via usePageMeta; this is the belt to
+# that pair of braces.
+Disallow: /checkout
+Disallow: /cart
+Disallow: /order/
+Disallow: /konto
+Disallow: /admin
+Disallow: /reset-password
+Disallow: /havemaaler/scan
+
+# Filtered shop views are the same products in a different order.
+Disallow: /webshop?*
+
+Sitemap: https://havekongen.dk/sitemap.xml

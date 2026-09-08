@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { rawHttpsGet } from "../_shared/rawHttps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const DEFAULT_CROP_METERS = 36;
@@ -159,6 +160,9 @@ function dataforsyningenUrl(bbox: Bbox, width: number, height: number, token: st
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "lawn-crop", limit: 60, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
   if (req.method !== "POST") return json({ error: "method_not_allowed", detail: "POST required" }, 405);
 
   try {
@@ -216,7 +220,7 @@ Deno.serve(async (req: Request) => {
     }
 
     let bytes: Uint8Array;
-    const imagerySource: "dataforsyningen" = "dataforsyningen";
+    const imagerySource = "dataforsyningen" as const;
     try {
       bytes = await fetchImageBytes(dataforsyningenUrl(bbox, width, height, dataforsyningenToken), 2, 5200);
     } catch (e) {

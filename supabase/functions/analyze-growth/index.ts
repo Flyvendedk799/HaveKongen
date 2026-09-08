@@ -1,6 +1,7 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const SYSTEM = `Du er en dansk havecoach med speciale i visuel vækstsporing.
@@ -22,6 +23,9 @@ Svar KUN som JSON:
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "analyze-growth", requireAuth: true, limit: 20, windowSeconds: 60, aiDailyLimit: 60 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const { imageDataUrl, note, context } = await req.json();

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Package, Leaf, ShoppingBag, Users, Image as ImageIcon,
-  FileText, Bell, BarChart3, History, ArrowLeft,
+  FileText, Bell, BarChart3, History, ArrowLeft, Tag, Star, Inbox,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -16,6 +16,9 @@ const items = [
   { to: "/admin/products", label: "Produkter", icon: Package },
   { to: "/admin/plants", label: "Plante-katalog", icon: Leaf },
   { to: "/admin/orders", label: "Ordrer", icon: ShoppingBag },
+  { to: "/admin/discounts", label: "Rabatkoder", icon: Tag },
+  { to: "/admin/reviews", label: "Anmeldelser", icon: Star },
+  { to: "/admin/inbox", label: "Indbakke", icon: Inbox },
   { to: "/admin/users", label: "Brugere", icon: Users },
   { to: "/admin/media", label: "Mediebibliotek", icon: ImageIcon },
   { to: "/admin/content", label: "Indhold", icon: FileText },

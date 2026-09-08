@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 function json(body: unknown, status = 200) {
@@ -55,6 +56,9 @@ async function signedUploadTargets(prefix: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "create-garden-scan-session", limit: 30, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {

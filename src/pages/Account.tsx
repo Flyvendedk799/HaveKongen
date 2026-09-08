@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent, CSSProperties, ElementType, FormEvent, ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, Bell, Bot, CalendarDays, CheckCircle2, CloudSun, Database, Layers3, Link2, MapPinned, PauseCircle, PlugZap, RefreshCcw, Ruler, ShieldCheck, Sparkles } from "lucide-react";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import GardenThumbnailImage from "@/components/garden/GardenThumbnailImage";
+import { OrdersCard } from "@/components/account/OrdersCard";
+import { AddressBook } from "@/components/account/AddressBook";
+import { PrivacyCard } from "@/components/account/PrivacyCard";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
@@ -57,9 +60,13 @@ const PROVIDER_ICONS: Record<string, ElementType> = {
   "local-weather": CloudSun,
 };
 
+/** Sections reachable as /konto?tab=… from links elsewhere in the app. */
+const TAB_SECTIONS = new Set(["ordrer", "adresser", "privatliv"]);
+
 export default function Account() {
   const { user, loading, signOut } = useAuth();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const { activeGardenId, setActive } = useActiveGarden();
   const [profile, setProfile] = useState<Profile>({ name: "", address: "", postal_code: "", avatar_url: null });
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -127,6 +134,17 @@ export default function Account() {
       }
     })();
   }, [user]);
+
+  // Deep links such as /konto?tab=privatliv scroll to the matching section
+  // once the page has rendered it.
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (!tab || !TAB_SECTIONS.has(tab) || loading) return;
+    const timer = setTimeout(() => {
+      document.getElementById(tab)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [searchParams, loading]);
 
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
@@ -456,22 +474,18 @@ export default function Account() {
           </Card>
 
           {/* Orders */}
-          <Card title="Seneste ordrer" action={<Link to="/webshop" className="btn btn-ghost btn-sm">Til webshop</Link>}>
-            {orders.length === 0 ? (
-              <Empty text="Ingen ordrer endnu." cta={{ to: "/webshop", label: "Se webshop" }} />
-            ) : (
-              <div style={{ display: "grid", gap: 10 }}>
-                {orders.map(o => (
-                  <Link to={`/order/${o.id}`} key={o.id} style={{ textDecoration: "none" }}>
-                    <Row
-                      title={`Ordre #${o.id.slice(0, 8).toUpperCase()}`}
-                      sub={`${fmtDate(o.created_at)} · ${o.status}`}
-                      right={`${fmt(o.total_dkk)} kr`}
-                    />
-                  </Link>
-                ))}
-              </div>
-            )}
+          <Card id="ordrer" title="Ordrer" action={<Link to="/webshop" className="btn btn-ghost btn-sm">Til webshop</Link>}>
+            <OrdersCard />
+          </Card>
+
+          {/* Delivery addresses */}
+          <Card id="adresser" title="Leveringsadresser">
+            <AddressBook />
+          </Card>
+
+          {/* GDPR self-service */}
+          <Card id="privatliv" title="Privatliv og data">
+            <PrivacyCard />
           </Card>
 
           {/* Wishlist */}
@@ -559,9 +573,9 @@ function Stat({ label, value, link }: { label: string; value: string; link?: str
   return link ? <Link to={link} style={{ textDecoration: "none" }}>{inner}</Link> : inner;
 }
 
-function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+function Card({ id, title, action, children }: { id?: string; title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="account-card">
+    <section className="account-card" id={id}>
       <div className="account-card-head">
         <h3>{title}</h3>
         {action}

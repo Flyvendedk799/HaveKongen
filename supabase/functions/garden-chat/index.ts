@@ -1,10 +1,11 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Global garden assistant: streaming chat with tool calling.
 // Tools execute server-side against the authenticated user's garden data.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const TOOLS = [
@@ -74,6 +75,9 @@ const TOOLS = [
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "garden-chat", requireAuth: true, limit: 30, windowSeconds: 60, aiDailyLimit: 120 });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const auth = req.headers.get("Authorization");
     if (!auth) return json({ error: "Unauthorized" }, 401);
@@ -118,7 +122,7 @@ ${JSON.stringify({
 })}`;
 
     // Tool execution loop (non-streaming until tools resolved, then stream final answer)
-    let convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
+    const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
 
     for (let i = 0; i < 4; i++) {
       const r = await fetch("https://api.openai.com/v1/chat/completions", {

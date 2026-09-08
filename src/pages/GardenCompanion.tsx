@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AppNav, SiteFooter } from "@/components/layout/SiteChrome";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
 import {
@@ -182,7 +183,9 @@ export default function GardenCompanion() {
     if (!user || !garden) return;
     const payload = {
       name: bed.name,
-      type: bed.type as ZoneRow["type"],
+      // garden_zones.type is a Postgres enum; Zone.type is a plain string in the
+      // watering model, so the cast belongs here, at the database boundary.
+      type: bed.type as Database["public"]["Enums"]["zone_type"],
       area_m2: bed.area_m2,
       sun_exposure: bed.sun_exposure,
       soil: bed.soil,

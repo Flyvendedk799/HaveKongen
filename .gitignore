@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local env overrides. Note that `.env` itself IS tracked in this repo: it holds
+# only the Supabase URL, project ref and the anon key, all of which are compiled
+# into the browser bundle anyway, and the ServerHoster deploy may be building
+# straight from the checkout. Untracking it needs deploy-side coordination
+# first — see the note in README.md.
+#
+# Nothing secret goes in .env. Edge-function secrets belong on the Supabase
+# project (`supabase secrets set …`), never in a file the browser bundle reads.
+.env.local
+.env.*.local

@@ -1,3 +1,4 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Samples Denmark's national elevation model (Danmarks Højdemodel, DHM) over a
 // garden so Havemåler Part 2 can show real ground slope and pre-fill object
 // heights. Terrain (dhm_terraen / DTM) gives bare-earth height; surface
@@ -14,7 +15,7 @@
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 function json(body: unknown, status = 200) {
@@ -306,6 +307,9 @@ function toGrid(raw: { data: Float32Array; width: number; height: number }, cols
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "get-elevation", limit: 120, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const token = Deno.env.get("DATAFORSYNINGEN_TOKEN");
     if (!token) return unavailable("DATAFORSYNINGEN_TOKEN not set");

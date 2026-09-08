@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { create } from "zustand";
 import { Command } from "cmdk";
-import { supabase } from "@/integrations/supabase/client";
+import { searchCatalog, type SearchHit } from "@/lib/shop";
 import {
   ShoppingBag,
   Ruler,
@@ -28,8 +28,7 @@ export const useCommandPalette = create<PaletteState>((set) => ({
   toggle: () => set((s) => ({ isOpen: !s.isOpen })),
 }));
 
-type ProductHit = { id: string; name: string; slug: string; category: string };
-type PlantHit = { slug: string; name_da: string; latin: string | null };
+
 
 const PAGES: { label: string; to: string; hint?: string; icon: JSX.Element }[] = [
   { label: "Forsiden", to: "/", icon: <Home size={16} /> },
@@ -40,14 +39,17 @@ const PAGES: { label: string; to: string; hint?: string; icon: JSX.Element }[] =
   { label: "Plantepleje AI", to: "/ai", hint: "Spørg AI'en", icon: <Sparkles size={16} /> },
   { label: "Min konto", to: "/konto", icon: <UserIcon size={16} /> },
   { label: "Kurv", to: "/cart", icon: <ShoppingCart size={16} /> },
+  { label: "Kontakt", to: "/kontakt", hint: "Skriv til os", icon: <UserIcon size={16} /> },
+  { label: "Levering og retur", to: "/levering-og-retur", hint: "Fragt, retur, reklamation", icon: <ShoppingBag size={16} /> },
+  { label: "Handelsbetingelser", to: "/handelsbetingelser", icon: <ShoppingBag size={16} /> },
 ];
 
 export function CommandPalette() {
   const { isOpen, open, close, toggle } = useCommandPalette();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [products, setProducts] = useState<ProductHit[]>([]);
-  const [plants, setPlants] = useState<PlantHit[]>([]);
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Global ⌘K / Ctrl+K toggle
   useEffect(() => {
@@ -67,24 +69,45 @@ export function CommandPalette() {
     if (!isOpen) setQuery("");
   }, [isOpen]);
 
-  // Load lightweight catalogs once when first opened
+  // Search runs in the database via search_catalog(), which uses Danish
+  // stemming — so "planter" finds "plante" — and covers the whole catalogue
+  // rather than the first 200 rows we happened to download.
   useEffect(() => {
     if (!isOpen) return;
-    if (products.length === 0) {
-      supabase
-        .from("products")
-        .select("id, name, slug, category")
-        .limit(200)
-        .then(({ data }) => setProducts((data as ProductHit[]) || []));
+    const term = query.trim();
+    if (term.length < 2) {
+      setHits([]);
+      setSearching(false);
+      return;
     }
-    if (plants.length === 0) {
-      supabase
-        .from("plants_catalog")
-        .select("slug, name_da, latin")
-        .limit(200)
-        .then(({ data }) => setPlants((data as PlantHit[]) || []));
-    }
-  }, [isOpen, products.length, plants.length]);
+    setSearching(true);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchCatalog(term, 16)
+        .then((rows) => {
+          // A slow response for an old query must not overwrite a newer one.
+          if (!cancelled) setHits(rows);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, isOpen]);
+
+  // Pages are filtered locally; there is no point round-tripping for eight
+  // static entries.
+  const pageHits = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return PAGES;
+    return PAGES.filter((p) => `${p.label} ${p.hint ?? ""}`.toLowerCase().includes(needle));
+  }, [query]);
+
+  const productHits = useMemo(() => hits.filter((h) => h.kind === "product"), [hits]);
+  const plantHits = useMemo(() => hits.filter((h) => h.kind === "plant"), [hits]);
 
   if (!isOpen) return null;
 
@@ -96,7 +119,7 @@ export function CommandPalette() {
   return (
     <div className="cmdk-backdrop" onClick={close} role="presentation">
       <div className="cmdk-shell" onClick={(e) => e.stopPropagation()}>
-        <Command shouldFilter label="Global søgning">
+        <Command shouldFilter={false} label="Global søgning">
           <div className="cmdk-input-row">
             <Command.Input
               autoFocus
@@ -108,10 +131,15 @@ export function CommandPalette() {
             <kbd className="cmdk-esc">esc</kbd>
           </div>
           <Command.List className="cmdk-list">
-            <Command.Empty className="cmdk-empty">Intet match.</Command.Empty>
+            {pageHits.length === 0 && hits.length === 0 && (
+              <div className="cmdk-empty">
+                {searching ? "Søger…" : query.trim().length < 2 ? "Skriv for at søge." : "Intet match."}
+              </div>
+            )}
 
+            {pageHits.length > 0 && (
             <Command.Group heading="Sider" className="cmdk-group">
-              {PAGES.map((p) => (
+              {pageHits.map((p) => (
                 <Command.Item
                   key={p.to}
                   value={`page ${p.label} ${p.hint ?? ""}`}
@@ -124,36 +152,39 @@ export function CommandPalette() {
                 </Command.Item>
               ))}
             </Command.Group>
+            )}
 
-            {products.length > 0 && (
+            {productHits.length > 0 && (
               <Command.Group heading="Produkter" className="cmdk-group">
-                {products.slice(0, 12).map((p) => (
+                {productHits.map((p) => (
                   <Command.Item
                     key={p.id}
-                    value={`product ${p.name} ${p.category}`}
+                    value={p.id}
                     onSelect={() => go(`/webshop/${p.slug}`)}
                     className="cmdk-item"
                   >
                     <span className="cmdk-icon"><ShoppingBag size={16} /></span>
-                    <span className="cmdk-label">{p.name}</span>
-                    <span className="cmdk-hint">{p.category}</span>
+                    <span className="cmdk-label">{p.title}</span>
+                    <span className="cmdk-hint">
+                      {p.price_dkk != null ? `${p.price_dkk} kr` : p.category}
+                    </span>
                   </Command.Item>
                 ))}
               </Command.Group>
             )}
 
-            {plants.length > 0 && (
+            {plantHits.length > 0 && (
               <Command.Group heading="Planter" className="cmdk-group">
-                {plants.slice(0, 12).map((p) => (
+                {plantHits.map((p) => (
                   <Command.Item
                     key={p.slug}
-                    value={`plant ${p.name_da} ${p.latin ?? ""}`}
+                    value={p.slug}
                     onSelect={() => go(`/ai?plant=${encodeURIComponent(p.slug)}`)}
                     className="cmdk-item"
                   >
                     <span className="cmdk-icon"><Leaf size={16} /></span>
-                    <span className="cmdk-label">{p.name_da}</span>
-                    {p.latin && <span className="cmdk-hint">{p.latin}</span>}
+                    <span className="cmdk-label">{p.title}</span>
+                    {p.subtitle && <span className="cmdk-hint">{p.subtitle}</span>}
                   </Command.Item>
                 ))}
               </Command.Group>

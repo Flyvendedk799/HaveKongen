@@ -3,6 +3,7 @@ import { Camera, Sparkles, Loader2, Droplets, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/lib/shop";
 import { fileToDataUrl } from "@/lib/plantPhotos";
 import { toast } from "sonner";
 
@@ -41,11 +42,8 @@ export default function BedScanDialog({
     setAnalyzing(true);
     try {
       const note = `Vurder DETTE BED som helhed (ikke en enkelt plante). Bedet hedder "${zoneName}"${plantNames.length ? ` og indeholder: ${plantNames.slice(0, 8).join(", ")}` : ""}. Bedøm: jordfugtighed (tør/passende/våd), planters vitalitet, om der skal vandes nu, og næste handling.`;
-      const { data, error } = await supabase.functions.invoke("plant-diagnose", {
-        body: { imageDataUrl: preview, note },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
+      const data = await invokeFunction<any>("plant-diagnose", { imageDataUrl: preview, note });
+      if ((data as any)?.error) throw new Error((data as any).message ?? (data as any).error);
       setResult({
         diagnosis: (data as any).diagnosis ?? "Ingen tydelig konklusion",
         severity: (data as any).severity ?? "low",

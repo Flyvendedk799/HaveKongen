@@ -1,11 +1,15 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Per-plant AI care assistant. Streams short Danish answers tailored to a plant + zone context.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "plant-coach", requireAuth: true, limit: 30, windowSeconds: 60, aiDailyLimit: 100 });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const { question, plant, zone } = await req.json();
     if (!question) return new Response(JSON.stringify({ error: "question required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });

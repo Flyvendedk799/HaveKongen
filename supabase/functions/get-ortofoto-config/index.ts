@@ -1,6 +1,7 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 /**
@@ -35,6 +36,9 @@ const TILE_PATH = "/functions/v1/ortofoto-tile?width=512&height=512&bbox={bbox-e
 
 Deno.serve((req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "get-ortofoto-config", limit: 120, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
 
   const origin = publicOrigin(req);
 

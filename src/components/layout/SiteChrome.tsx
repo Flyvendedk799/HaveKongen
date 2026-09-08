@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useCart } from "@/lib/cart";
 import { useCommandPalette } from "@/components/CommandPalette";
+import { useConsent } from "@/lib/consent";
+import { NewsletterSignup } from "@/components/NewsletterSignup";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { supabase } from "@/integrations/supabase/client";
 import { ShoppingCart, Search, User as UserIcon } from "lucide-react";
@@ -134,6 +136,7 @@ export function SiteFooter() {
             <p style={{ color: "rgba(237,232,223,0.6)", fontSize: 14, maxWidth: 320, lineHeight: 1.6 }}>
               Lev din have. Fra det første frø, til årets sidste blad.
             </p>
+            <NewsletterSignup />
           </div>
           <div className="footer-col">
             <h4>Webshop</h4>
@@ -156,16 +159,25 @@ export function SiteFooter() {
           <div className="footer-col">
             <h4>Os</h4>
             <ul>
-              <li><a href="#">Om Havekongen</a></li>
-              <li><a href="#">Kontakt</a></li>
-              <li><a href="#">Presse</a></li>
-              <li><a href="#">Vilkår</a></li>
+              <li><Link to="/om">Om Havekongen</Link></li>
+              <li><Link to="/kontakt">Kontakt</Link></li>
+              <li><Link to="/levering-og-retur">Levering &amp; retur</Link></li>
+              <li><Link to="/handelsbetingelser">Handelsbetingelser</Link></li>
+              <li><Link to="/privatliv">Privatlivspolitik</Link></li>
+              <li><Link to="/cookies">Cookies</Link></li>
             </ul>
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 Havekongen ApS — København</span>
-          <span>CVR 4488 1230 · Made in Denmark</span>
+          <span>© {new Date().getFullYear()} Havekongen ApS — København</span>
+          <span>
+            CVR 4488 1230 · Made in Denmark ·{" "}
+            {/* Withdrawing consent has to be as easy as giving it, so the banner
+                stays one click away from every page. */}
+            <button type="button" className="footer-consent" onClick={() => useConsent.getState().reopen()}>
+              Cookieindstillinger
+            </button>
+          </span>
         </div>
       </div>
     </footer>

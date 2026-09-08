@@ -29,7 +29,15 @@ type Product = {
   gradient: string | null;
   svg_art: string | null;
   meta: string | null;
+  image_url: string | null;
   in_stock: boolean;
+  stock_qty: number;
+  track_inventory: boolean;
+  low_stock_threshold: number;
+  rating_avg: number;
+  rating_count: number;
+  active: boolean;
+  sku: string | null;
 };
 
 const RV_KEY = "havekongen-recently-viewed";
@@ -52,15 +60,10 @@ export default function ProductDetail() {
   const { user } = useAuth();
   const nav = useNavigate();
 
-  usePageMeta({
-    title: p ? `${p.name} · Havekongen` : "Produkt · Havekongen",
-    description: p?.short_description || p?.meta || undefined,
-  });
-
   useEffect(() => {
     if (!slug) return;
     setP(null);
-    supabase.from("products").select("*").eq("slug", slug).maybeSingle().then(async ({ data }) => {
+    supabase.from("products").select("*").eq("slug", slug).eq("active", true).maybeSingle().then(async ({ data }) => {
       const prod = data as Product | null;
       setP(prod);
       if (prod) {
@@ -70,6 +73,7 @@ export default function ProductDetail() {
           .from("products")
           .select("*")
           .eq("category", prod.category)
+          .eq("active", true)
           .neq("id", prod.id)
           .limit(6);
         setRelated((rel as Product[]) || []);
@@ -86,17 +90,79 @@ export default function ProductDetail() {
 
   useEffect(() => { if (user) wishlist.load(); }, [user]); // eslint-disable-line
 
+  // Availability follows the same rule as the pricing engine: a counted item is
+  // limited by stock_qty, an uncounted one by the in_stock flag.
+  const availability = useMemo(() => {
+    if (!p) return { sellable: false, label: "Udsolgt", tone: "out" as const, max: 0 };
+    if (p.track_inventory) {
+      if (p.stock_qty <= 0) return { sellable: false, label: "Udsolgt", tone: "out" as const, max: 0 };
+      if (p.stock_qty <= p.low_stock_threshold) {
+        return { sellable: true, label: `Kun ${p.stock_qty} tilbage`, tone: "low" as const, max: p.stock_qty };
+      }
+      return { sellable: true, label: "På lager", tone: "in" as const, max: p.stock_qty };
+    }
+    return p.in_stock
+      ? { sellable: true, label: "På lager", tone: "in" as const, max: 99 }
+      : { sellable: false, label: "Udsolgt", tone: "out" as const, max: 0 };
+  }, [p]);
+
+  // JSON-LD. aggregateRating is only emitted when real approved reviews exist —
+  // Google treats a fabricated rating as a structured-data violation, and it
+  // would be a lie besides.
+  const jsonLd = useMemo(() => (p ? {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: p.name,
+    description: p.description || p.short_description || undefined,
+    category: p.category,
+    sku: p.sku || undefined,
+    brand: { "@type": "Brand", name: "Havekongen" },
+    offers: {
+      "@type": "Offer",
+      url: typeof window !== "undefined" ? window.location.href : undefined,
+      price: p.base_price_dkk,
+      priceCurrency: "DKK",
+      availability: availability.sellable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      itemCondition: "https://schema.org/NewCondition",
+      hasMerchantReturnPolicy: {
+        "@type": "MerchantReturnPolicy",
+        applicableCountry: "DK",
+        returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow",
+        merchantReturnDays: 30,
+      },
+    },
+    ...(p.rating_count > 0
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: Number(p.rating_avg).toFixed(1),
+            reviewCount: p.rating_count,
+            bestRating: 5,
+            worstRating: 1,
+          },
+        }
+      : {}),
+  } : null), [p, availability]);
+
+  usePageMeta({
+    title: p ? `${p.name} · Havekongen` : "Produkt · Havekongen",
+    description: p?.short_description || p?.meta || undefined,
+    image: p?.image_url || undefined,
+    jsonLd,
+  });
+
   const specs = useMemo(() => {
     if (!p) return [];
     return [
       { label: "Kategori", value: p.category },
-      { label: "Lager", value: p.in_stock ? "På lager" : "Udsolgt" },
+      { label: "Lager", value: availability.label },
+      p.sku ? { label: "Varenummer", value: p.sku } : null,
       { label: "Egnet til", value: p.meta || "Have & terrasse" },
       { label: "Oprindelse", value: "Designet i Danmark" },
-      { label: "Garanti", value: "5 års garanti" },
-      { label: "Fragt", value: "1–3 hverdage" },
-    ];
-  }, [p]);
+      { label: "Moms", value: "Prisen er inkl. 25% moms" },
+      { label: "Retur", value: "30 dages retur · 14 dages fortrydelsesret" },
+    ].filter(Boolean) as { label: string; value: string }[];
+  }, [p, availability]);
 
   if (!p) {
     return (
@@ -109,11 +175,22 @@ export default function ProductDetail() {
   }
 
   const addToCart = () => {
+    if (!availability.sellable) {
+      toast.error(`${p.name} er udsolgt lige nu.`);
+      return;
+    }
+    // Clamp here as well as in the database: better to tell someone now than to
+    // let them reach the checkout and be told the basket has to shrink.
+    const wanted = Math.min(qty, availability.max);
+    if (wanted < qty) {
+      toast.warning(`Vi har kun ${availability.max} stk. på lager — kurven er sat til det.`);
+      setQty(wanted);
+    }
     cart.add({
       productId: p.id,
       name: p.name,
       unitPriceDkk: p.base_price_dkk,
-      qty,
+      qty: wanted,
       imageGradient: p.gradient || undefined,
       imageSvg: p.svg_art || undefined,
     });
@@ -127,20 +204,6 @@ export default function ProductDetail() {
     await wishlist.toggle(p.id);
   };
 
-  // JSON-LD
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    name: p.name,
-    description: p.description || p.short_description || undefined,
-    category: p.category,
-    offers: {
-      "@type": "Offer",
-      price: p.base_price_dkk,
-      priceCurrency: "DKK",
-      availability: p.in_stock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-    },
-  };
 
   const bundleItems = related.slice(0, 2).length === 2
     ? [{ id: p.id, name: p.name, base_price_dkk: p.base_price_dkk, gradient: p.gradient, svg_art: p.svg_art }, ...related.slice(0, 2)]
@@ -149,7 +212,6 @@ export default function ProductDetail() {
   return (
     <>
       <AppNav active="shop" />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
       <div className="pdp-crumbs container">
         <Link to="/webshop">← Webshop</Link>
@@ -162,7 +224,7 @@ export default function ProductDetail() {
         meta={p.meta}
         short={p.short_description}
         price={p.base_price_dkk}
-        inStock={p.in_stock}
+        inStock={availability.sellable}
         gradient={p.gradient}
         svg={p.svg_art}
         qty={qty}
@@ -183,7 +245,7 @@ export default function ProductDetail() {
       <StoryBand gradient={p.gradient} name={p.name} body={p.description || p.short_description} />
 
       <div className="container">
-        <ReviewsBlock />
+        <ReviewsBlock productId={p.id} productName={p.name} />
         {bundleItems.length > 0 && <BundleRow items={bundleItems} />}
         <ProductCarousel title="Relaterede produkter" items={related.slice(0, 6)} />
         {recent.length > 0 && <ProductCarousel title="Set for nylig" items={recent} />}
@@ -196,7 +258,7 @@ export default function ProductDetail() {
         setQty={setQty}
         onAdd={addToCart}
         onBuy={buyNow}
-        inStock={p.in_stock}
+        inStock={availability.sellable}
       />
 
       <SiteFooter />

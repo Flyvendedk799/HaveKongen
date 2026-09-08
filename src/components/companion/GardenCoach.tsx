@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/lib/shop";
 import type { Tables } from "@/integrations/supabase/types";
 import type { CareAction, CompanionPreferences, HealthScore, ZoneInsight } from "@/lib/companionTypes";
 
@@ -75,15 +76,14 @@ export default function GardenCoach(props: Props) {
         recent_observations: props.observations.slice(0, 8),
         preferences: props.preferences,
       };
-      const { data, error } = await supabase.functions.invoke("garden-chat", {
-        body: {
-          messages: [
-            { role: "system", content: `Havekompagnon kontekst: ${JSON.stringify(context)}` },
-            ...nextMessages,
-          ],
-        },
+      // invokeFunction so a rate-limit or daily-quota rejection reaches the
+      // user as its own message rather than the generic transport one.
+      const data = await invokeFunction<{ content?: string } | string>("garden-chat", {
+        messages: [
+          { role: "system", content: `Havekompagnon kontekst: ${JSON.stringify(context)}` },
+          ...nextMessages,
+        ],
       });
-      if (error) throw error;
       const content = typeof data === "string" ? data : typeof data?.content === "string" ? data.content : fallbackAnswer(prompt, props);
       setMessages((prev) => [...prev, { role: "assistant", content }]);
     } catch (error) {

@@ -7,7 +7,7 @@ import { useWishlist } from "@/lib/wishlist";
 import { useAuth } from "@/lib/auth";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { toast } from "sonner";
-import { Heart } from "lucide-react";
+import { Heart, Search, Star, X } from "lucide-react";
 
 type Product = {
   id: string;
@@ -20,9 +20,24 @@ type Product = {
   svg_art: string | null;
   meta: string | null;
   in_stock: boolean;
+  stock_qty: number;
+  track_inventory: boolean;
+  low_stock_threshold: number;
+  rating_avg: number;
+  rating_count: number;
+  active: boolean;
   featured?: boolean;
   created_at?: string;
 };
+
+/**
+ * Whether a product can be put in a basket, using the same rule as the pricing
+ * engine: track_inventory decides whether stock_qty means anything, and an
+ * uncounted product falls back to the in_stock flag.
+ */
+export function isSellable(p: Pick<Product, "in_stock" | "stock_qty" | "track_inventory">): boolean {
+  return p.track_inventory ? p.stock_qty > 0 : p.in_stock;
+}
 
 const CATS = [
   { key: "all", label: "Alt" },
@@ -32,7 +47,7 @@ const CATS = [
   { key: "vanding", label: "Vanding" },
 ];
 
-type Sort = "featured" | "newest" | "price-asc" | "price-desc";
+type Sort = "featured" | "newest" | "price-asc" | "price-desc" | "rating";
 
 export default function Webshop() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -41,6 +56,7 @@ export default function Webshop() {
   const cat = params.get("cat") || "all";
   const sort = (params.get("sort") || "featured") as Sort;
   const inStockOnly = params.get("stock") === "1";
+  const q = params.get("q") ?? "";
   const minP = Number(params.get("min") || 0);
   const maxP = Number(params.get("max") || 0);
   const cart = useCart();
@@ -53,7 +69,7 @@ export default function Webshop() {
   });
 
   useEffect(() => {
-    supabase.from("products").select("*").order("featured", { ascending: false }).then(({ data }) => {
+    supabase.from("products").select("*").eq("active", true).order("featured", { ascending: false }).then(({ data }) => {
       setProducts((data as Product[]) || []);
       setLoading(false);
     });
@@ -68,15 +84,28 @@ export default function Webshop() {
   };
 
   const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
     let list = products.filter((p) => cat === "all" || p.category === cat);
-    if (inStockOnly) list = list.filter((p) => p.in_stock);
+    if (needle) {
+      list = list.filter((p) =>
+        [p.name, p.short_description, p.meta, p.category]
+          .some((field) => (field ?? "").toLowerCase().includes(needle)),
+      );
+    }
+    if (inStockOnly) list = list.filter(isSellable);
     if (minP > 0) list = list.filter((p) => p.base_price_dkk >= minP);
     if (maxP > 0) list = list.filter((p) => p.base_price_dkk <= maxP);
     if (sort === "price-asc") list = [...list].sort((a, b) => a.base_price_dkk - b.base_price_dkk);
     else if (sort === "price-desc") list = [...list].sort((a, b) => b.base_price_dkk - a.base_price_dkk);
     else if (sort === "newest") list = [...list].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    else if (sort === "rating") {
+      // Unrated products sink rather than tying at zero with genuinely bad ones.
+      list = [...list].sort(
+        (a, b) => b.rating_avg - a.rating_avg || b.rating_count - a.rating_count,
+      );
+    }
     return list;
-  }, [products, cat, sort, inStockOnly, minP, maxP]);
+  }, [products, cat, sort, inStockOnly, minP, maxP, q]);
 
   return (
     <>
@@ -101,6 +130,21 @@ export default function Webshop() {
         </div>
 
         <div className="shop-filterbar">
+          <div className="shop-search">
+            <Search size={15} />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => updateParam("q", e.target.value || null)}
+              placeholder="Søg i sortimentet…"
+              aria-label="Søg i sortimentet"
+            />
+            {q && (
+              <button type="button" className="clear" onClick={() => updateParam("q", null)} aria-label="Ryd søgning">
+                <X size={14} />
+              </button>
+            )}
+          </div>
           <label className="chip" style={{ cursor: "pointer" }}>
             <input
               type="checkbox"
@@ -138,6 +182,7 @@ export default function Webshop() {
             <option value="newest">Nyeste</option>
             <option value="price-asc">Pris: lav → høj</option>
             <option value="price-desc">Pris: høj → lav</option>
+            <option value="rating">Bedst bedømt</option>
           </select>
         </div>
 
@@ -154,7 +199,8 @@ export default function Webshop() {
           </div>
         ) : visible.length === 0 ? (
           <div style={{ padding: "60px 0", textAlign: "center", color: "var(--ink-500)" }}>
-            Ingen produkter matcher filtrene. <button className="btn btn-ghost btn-sm" onClick={() => setParams({})}>Nulstil</button>
+            {q ? `Ingen produkter matcher "${q}".` : "Ingen produkter matcher filtrene."}{" "}
+            <button className="btn btn-ghost btn-sm" onClick={() => setParams({})}>Nulstil</button>
           </div>
         ) : (
           <div className="shop-grid" style={{ marginBottom: 80 }}>
@@ -190,6 +236,7 @@ export default function Webshop() {
 }
 
 function ProductCard({ product, onAdd, onWish, wished }: { product: Product; onAdd: () => void; onWish: () => void; wished: boolean }) {
+  const sellable = isSellable(product);
   return (
     <div className="product">
       <button
@@ -207,12 +254,21 @@ function ProductCard({ product, onAdd, onWish, wished }: { product: Product; onA
       </Link>
       <div className="name">
         {product.name}
-        {!product.in_stock && <span className="stock-pill out">Udsolgt</span>}
+        {!sellable && <span className="stock-pill out">Udsolgt</span>}
       </div>
       <div className="meta">{product.meta}</div>
+      {product.rating_count > 0 && (
+        <div className="rating-inline" aria-label={`${product.rating_avg.toFixed(1)} ud af 5`}>
+          <Star size={12} fill="currentColor" style={{ color: "var(--gold-600)" }} />
+          {product.rating_avg.toFixed(1)} ({product.rating_count})
+        </div>
+      )}
+      {sellable && product.track_inventory && product.stock_qty <= product.low_stock_threshold && (
+        <div className="stock-line low">Kun {product.stock_qty} tilbage</div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
         <div className="price">{formatDkk(product.base_price_dkk)}</div>
-        <button className="btn btn-ghost btn-sm" onClick={onAdd} disabled={!product.in_stock}>
+        <button className="btn btn-ghost btn-sm" onClick={onAdd} disabled={!sellable}>
           Læg i kurv
         </button>
       </div>

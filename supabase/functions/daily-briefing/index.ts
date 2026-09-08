@@ -1,3 +1,4 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Generates a personalised daily morning briefing for the authenticated user.
 // On-demand: called from the client when the user opens the "I dag" tab.
 // Caches one briefing per user per day in `daily_briefings`.
@@ -5,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 type Brief = {
@@ -18,6 +19,9 @@ type Brief = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "daily-briefing", requireAuth: true, limit: 10, windowSeconds: 60, aiDailyLimit: 20 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const auth = req.headers.get("Authorization");
