@@ -176,8 +176,16 @@ export default function AdminOrderDetail() {
             <Input value={order.tracking_number ?? ""} onChange={(e) => update("tracking_number", e.target.value)} />
           </div>
           <div className="md:col-span-2">
-            <Label>Interne noter</Label>
-            <Textarea rows={3} value={order.notes ?? ""} onChange={(e) => update("notes", e.target.value)} />
+            {/* place_order() writes the customer's checkout note here, so this
+                is not a purely internal field — saying otherwise would get a
+                customer's "stil pakken bag skuret" quietly overwritten. */}
+            <Label>Note på ordren</Label>
+            <Textarea
+              rows={3}
+              value={order.notes ?? ""}
+              onChange={(e) => update("notes", e.target.value)}
+              placeholder="Kundens besked fra kassen vises her. Din tekst gemmes i ordrens log."
+            />
           </div>
           {order.payment_status !== "paid" && order.status !== "cancelled" && (
             <div className="md:col-span-2 flex items-center gap-3 rounded-md border border-dashed p-3">
