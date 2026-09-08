@@ -1054,34 +1054,67 @@ export type Database = {
       }
       order_items: {
         Row: {
+          gradient: string | null
           id: string
+          image_url: string | null
+          line_discount_oere: number
+          line_total_oere: number
           name: string
           order_id: string
           product_id: string | null
+          product_slug: string | null
           qty: number
+          sku: string | null
+          svg_art: string | null
           unit_price_dkk: number
+          unit_price_oere: number
           user_id: string
           variant_id: string | null
+          variant_name: string | null
+          vat_oere: number
+          vat_rate: number
         }
         Insert: {
+          gradient?: string | null
           id?: string
+          image_url?: string | null
+          line_discount_oere?: number
+          line_total_oere?: number
           name: string
           order_id: string
           product_id?: string | null
+          product_slug?: string | null
           qty?: number
+          sku?: string | null
+          svg_art?: string | null
           unit_price_dkk: number
+          unit_price_oere?: number
           user_id: string
           variant_id?: string | null
+          variant_name?: string | null
+          vat_oere?: number
+          vat_rate?: number
         }
         Update: {
+          gradient?: string | null
           id?: string
+          image_url?: string | null
+          line_discount_oere?: number
+          line_total_oere?: number
           name?: string
           order_id?: string
           product_id?: string | null
+          product_slug?: string | null
           qty?: number
+          sku?: string | null
+          svg_art?: string | null
           unit_price_dkk?: number
+          unit_price_oere?: number
           user_id?: string
           variant_id?: string | null
+          variant_name?: string | null
+          vat_oere?: number
+          vat_rate?: number
         }
         Relationships: [
           {
@@ -1109,40 +1142,103 @@ export type Database = {
       }
       orders: {
         Row: {
+          billing_address: Json | null
+          cancelled_at: string | null
           created_at: string
+          currency: string
+          delivered_at: string | null
+          discount_code: string | null
+          discount_oere: number
+          email: string | null
           id: string
+          idempotency_key: string | null
           notes: string | null
+          order_no: string | null
+          paid_at: string | null
+          payment_provider: string | null
+          payment_status: string
+          phone: string | null
+          placed_at: string | null
           refunded_at: string | null
           shipping_address: Json | null
+          shipping_method: string | null
+          shipping_oere: number
           shipping_status: string
+          shipped_at: string | null
           status: string
+          subtotal_oere: number
           total_dkk: number
+          total_oere: number
           tracking_number: string | null
+          updated_at: string
           user_id: string
+          vat_oere: number
         }
         Insert: {
+          billing_address?: Json | null
+          cancelled_at?: string | null
           created_at?: string
+          currency?: string
+          delivered_at?: string | null
+          discount_code?: string | null
+          discount_oere?: number
+          email?: string | null
           id?: string
+          idempotency_key?: string | null
           notes?: string | null
+          order_no?: string | null
+          paid_at?: string | null
+          payment_provider?: string | null
+          payment_status?: string
+          phone?: string | null
+          placed_at?: string | null
           refunded_at?: string | null
           shipping_address?: Json | null
+          shipping_method?: string | null
+          shipping_oere?: number
           shipping_status?: string
+          shipped_at?: string | null
           status?: string
+          subtotal_oere?: number
           total_dkk: number
+          total_oere?: number
           tracking_number?: string | null
+          updated_at?: string
           user_id: string
+          vat_oere?: number
         }
         Update: {
+          billing_address?: Json | null
+          cancelled_at?: string | null
           created_at?: string
+          currency?: string
+          delivered_at?: string | null
+          discount_code?: string | null
+          discount_oere?: number
+          email?: string | null
           id?: string
+          idempotency_key?: string | null
           notes?: string | null
+          order_no?: string | null
+          paid_at?: string | null
+          payment_provider?: string | null
+          payment_status?: string
+          phone?: string | null
+          placed_at?: string | null
           refunded_at?: string | null
           shipping_address?: Json | null
+          shipping_method?: string | null
+          shipping_oere?: number
           shipping_status?: string
+          shipped_at?: string | null
           status?: string
+          subtotal_oere?: number
           total_dkk?: number
+          total_oere?: number
           tracking_number?: string | null
+          updated_at?: string
           user_id?: string
+          vat_oere?: number
         }
         Relationships: []
       }
@@ -1434,6 +1530,7 @@ export type Database = {
       }
       products: {
         Row: {
+          active: boolean
           base_price_dkk: number
           category: string
           created_at: string
@@ -1443,13 +1540,23 @@ export type Database = {
           id: string
           image_url: string | null
           in_stock: boolean
+          low_stock_threshold: number
           meta: string | null
           name: string
+          rating_avg: number
+          rating_count: number
           short_description: string | null
+          sku: string | null
           slug: string
+          stock_qty: number
           svg_art: string | null
+          track_inventory: boolean
+          updated_at: string
+          vat_rate: number
+          weight_grams: number | null
         }
         Insert: {
+          active?: boolean
           base_price_dkk: number
           category: string
           created_at?: string
@@ -1459,13 +1566,23 @@ export type Database = {
           id?: string
           image_url?: string | null
           in_stock?: boolean
+          low_stock_threshold?: number
           meta?: string | null
           name: string
+          rating_avg?: number
+          rating_count?: number
           short_description?: string | null
+          sku?: string | null
           slug: string
+          stock_qty?: number
           svg_art?: string | null
+          track_inventory?: boolean
+          updated_at?: string
+          vat_rate?: number
+          weight_grams?: number | null
         }
         Update: {
+          active?: boolean
           base_price_dkk?: number
           category?: string
           created_at?: string
@@ -1475,11 +1592,20 @@ export type Database = {
           id?: string
           image_url?: string | null
           in_stock?: boolean
+          low_stock_threshold?: number
           meta?: string | null
           name?: string
+          rating_avg?: number
+          rating_count?: number
           short_description?: string | null
+          sku?: string | null
           slug?: string
+          stock_qty?: number
           svg_art?: string | null
+          track_inventory?: boolean
+          updated_at?: string
+          vat_rate?: number
+          weight_grams?: number | null
         }
         Relationships: []
       }
@@ -1493,6 +1619,10 @@ export type Database = {
           longitude: number | null
           name: string | null
           onboarded_at: string | null
+          deletion_requested_at: string | null
+          locale: string
+          marketing_opt_in: boolean
+          phone: string | null
           postal_code: string | null
           updated_at: string
         }
@@ -1505,6 +1635,10 @@ export type Database = {
           longitude?: number | null
           name?: string | null
           onboarded_at?: string | null
+          deletion_requested_at?: string | null
+          locale?: string
+          marketing_opt_in?: boolean
+          phone?: string | null
           postal_code?: string | null
           updated_at?: string
         }
@@ -1517,6 +1651,10 @@ export type Database = {
           longitude?: number | null
           name?: string | null
           onboarded_at?: string | null
+          deletion_requested_at?: string | null
+          locale?: string
+          marketing_opt_in?: boolean
+          phone?: string | null
           postal_code?: string | null
           updated_at?: string
         }
@@ -1933,11 +2071,721 @@ export type Database = {
         }
         Relationships: []
       }
+account_deletion_requests: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          reason: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          reason?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          reason?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      addresses: {
+        Row: {
+          city: string
+          country: string
+          created_at: string
+          id: string
+          is_default_billing: boolean
+          is_default_shipping: boolean
+          label: string | null
+          name: string
+          phone: string | null
+          postal_code: string
+          street: string
+          street2: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          city: string
+          country?: string
+          created_at?: string
+          id?: string
+          is_default_billing?: boolean
+          is_default_shipping?: boolean
+          label?: string | null
+          name: string
+          phone?: string | null
+          postal_code: string
+          street: string
+          street2?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          city?: string
+          country?: string
+          created_at?: string
+          id?: string
+          is_default_billing?: boolean
+          is_default_shipping?: boolean
+          label?: string | null
+          name?: string
+          phone?: string | null
+          postal_code?: string
+          street?: string
+          street2?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ai_usage: {
+        Row: {
+          anon_key: string | null
+          calls: number
+          day: string
+          fn: string
+          id: string
+          tokens_in: number
+          tokens_out: number
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          anon_key?: string | null
+          calls?: number
+          day?: string
+          fn: string
+          id?: string
+          tokens_in?: number
+          tokens_out?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          anon_key?: string | null
+          calls?: number
+          day?: string
+          fn?: string
+          id?: string
+          tokens_in?: number
+          tokens_out?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      consents: {
+        Row: {
+          analytics: boolean
+          anon_id: string | null
+          created_at: string
+          functional: boolean
+          id: string
+          marketing: boolean
+          necessary: boolean
+          policy_version: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          analytics?: boolean
+          anon_id?: string | null
+          created_at?: string
+          functional?: boolean
+          id?: string
+          marketing?: boolean
+          necessary?: boolean
+          policy_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          analytics?: boolean
+          anon_id?: string | null
+          created_at?: string
+          functional?: boolean
+          id?: string
+          marketing?: boolean
+          necessary?: boolean
+          policy_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      contact_messages: {
+        Row: {
+          admin_note: string | null
+          body: string
+          created_at: string
+          email: string
+          id: string
+          name: string
+          order_no: string | null
+          status: string
+          subject: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          admin_note?: string | null
+          body: string
+          created_at?: string
+          email: string
+          id?: string
+          name: string
+          order_no?: string | null
+          status?: string
+          subject: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          admin_note?: string | null
+          body?: string
+          created_at?: string
+          email?: string
+          id?: string
+          name?: string
+          order_no?: string | null
+          status?: string
+          subject?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      discount_codes: {
+        Row: {
+          active: boolean
+          category: string | null
+          code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          kind: string
+          max_redemptions: number | null
+          min_subtotal_oere: number
+          per_user_limit: number
+          redemptions: number
+          starts_at: string | null
+          value: number
+        }
+        Insert: {
+          active?: boolean
+          category?: string | null
+          code: string
+          created_at?: string
+          description?: string | null
+          ends_at?: string | null
+          kind: string
+          max_redemptions?: number | null
+          min_subtotal_oere?: number
+          per_user_limit?: number
+          redemptions?: number
+          starts_at?: string | null
+          value?: number
+        }
+        Update: {
+          active?: boolean
+          category?: string | null
+          code?: string
+          created_at?: string
+          description?: string | null
+          ends_at?: string | null
+          kind?: string
+          max_redemptions?: number | null
+          min_subtotal_oere?: number
+          per_user_limit?: number
+          redemptions?: number
+          starts_at?: string | null
+          value?: number
+        }
+        Relationships: []
+      }
+      discount_redemptions: {
+        Row: {
+          amount_oere: number
+          code: string
+          created_at: string
+          id: string
+          order_id: string | null
+          user_id: string
+        }
+        Insert: {
+          amount_oere?: number
+          code: string
+          created_at?: string
+          id?: string
+          order_id?: string | null
+          user_id: string
+        }
+        Update: {
+          amount_oere?: number
+          code?: string
+          created_at?: string
+          id?: string
+          order_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      inventory_movements: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          delta: number
+          id: string
+          note: string | null
+          order_id: string | null
+          product_id: string | null
+          reason: string
+          variant_id: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          delta: number
+          id?: string
+          note?: string | null
+          order_id?: string | null
+          product_id?: string | null
+          reason: string
+          variant_id?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          delta?: number
+          id?: string
+          note?: string | null
+          order_id?: string | null
+          product_id?: string | null
+          reason?: string
+          variant_id?: string | null
+        }
+        Relationships: []
+      }
+      newsletter_subscribers: {
+        Row: {
+          confirmed_at: string | null
+          created_at: string
+          email: string
+          id: string
+          source: string | null
+          status: string
+          token: string
+          unsubscribed_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          confirmed_at?: string | null
+          created_at?: string
+          email: string
+          id?: string
+          source?: string | null
+          status?: string
+          token?: string
+          unsubscribed_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          confirmed_at?: string | null
+          created_at?: string
+          email?: string
+          id?: string
+          source?: string | null
+          status?: string
+          token?: string
+          unsubscribed_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      order_events: {
+        Row: {
+          actor_id: string | null
+          actor_kind: string
+          created_at: string
+          from_status: string | null
+          id: string
+          kind: string
+          message: string | null
+          meta: Json
+          order_id: string
+          to_status: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_kind?: string
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          kind: string
+          message?: string | null
+          meta?: Json
+          order_id: string
+          to_status?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          actor_kind?: string
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          kind?: string
+          message?: string | null
+          meta?: Json
+          order_id?: string
+          to_status?: string | null
+        }
+        Relationships: []
+      }
+      order_return_items: {
+        Row: {
+          id: string
+          order_item_id: string
+          qty: number
+          return_id: string
+        }
+        Insert: {
+          id?: string
+          order_item_id: string
+          qty: number
+          return_id: string
+        }
+        Update: {
+          id?: string
+          order_item_id?: string
+          qty?: number
+          return_id?: string
+        }
+        Relationships: []
+      }
+      order_returns: {
+        Row: {
+          admin_note: string | null
+          comment: string | null
+          created_at: string
+          id: string
+          order_id: string
+          reason: string
+          refund_oere: number
+          resolved_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          admin_note?: string | null
+          comment?: string | null
+          created_at?: string
+          id?: string
+          order_id: string
+          reason: string
+          refund_oere?: number
+          resolved_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          admin_note?: string | null
+          comment?: string | null
+          created_at?: string
+          id?: string
+          order_id?: string
+          reason?: string
+          refund_oere?: number
+          resolved_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      payments: {
+        Row: {
+          amount_oere: number
+          created_at: string
+          currency: string
+          id: string
+          instructions: Json | null
+          order_id: string
+          paid_at: string | null
+          provider: string
+          raw: Json
+          reference: string | null
+          refunded_oere: number
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount_oere: number
+          created_at?: string
+          currency?: string
+          id?: string
+          instructions?: Json | null
+          order_id: string
+          paid_at?: string | null
+          provider: string
+          raw?: Json
+          reference?: string | null
+          refunded_oere?: number
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount_oere?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          instructions?: Json | null
+          order_id?: string
+          paid_at?: string | null
+          provider?: string
+          raw?: Json
+          reference?: string | null
+          refunded_oere?: number
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      product_reviews: {
+        Row: {
+          admin_note: string | null
+          author_name: string | null
+          body: string | null
+          created_at: string
+          id: string
+          order_id: string | null
+          product_id: string
+          rating: number
+          status: string
+          title: string | null
+          updated_at: string
+          user_id: string | null
+          verified_purchase: boolean
+        }
+        Insert: {
+          admin_note?: string | null
+          author_name?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          order_id?: string | null
+          product_id: string
+          rating: number
+          status?: string
+          title?: string | null
+          updated_at?: string
+          user_id?: string | null
+          verified_purchase?: boolean
+        }
+        Update: {
+          admin_note?: string | null
+          author_name?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          order_id?: string | null
+          product_id?: string
+          rating?: number
+          status?: string
+          title?: string | null
+          updated_at?: string
+          user_id?: string | null
+          verified_purchase?: boolean
+        }
+        Relationships: []
+      }
+      rate_limit_buckets: {
+        Row: {
+          bucket_key: string
+          hits: number
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          bucket_key: string
+          hits?: number
+          updated_at?: string
+          window_start?: string
+        }
+        Update: {
+          bucket_key?: string
+          hits?: number
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      shipping_methods: {
+        Row: {
+          active: boolean
+          carrier: string | null
+          code: string
+          description: string | null
+          eta_max_days: number
+          eta_min_days: number
+          free_over_oere: number | null
+          name: string
+          price_oere: number
+          sort: number
+        }
+        Insert: {
+          active?: boolean
+          carrier?: string | null
+          code: string
+          description?: string | null
+          eta_max_days?: number
+          eta_min_days?: number
+          free_over_oere?: number | null
+          name: string
+          price_oere: number
+          sort?: number
+        }
+        Update: {
+          active?: boolean
+          carrier?: string | null
+          code?: string
+          description?: string | null
+          eta_max_days?: number
+          eta_min_days?: number
+          free_over_oere?: number | null
+          name?: string
+          price_oere?: number
+          sort?: number
+        }
+        Relationships: []
+      }
+      shop_settings: {
+        Row: {
+          key: string
+          public_read: boolean
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          public_read?: boolean
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          public_read?: boolean
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      admin_mark_order_paid: {
+        Args: { p_order_id: string; p_reference?: string | null }
+        Returns: Json
+      }
+      admin_resolve_return: {
+        Args: {
+          p_note?: string | null
+          p_refund_oere?: number | null
+          p_return_id: string
+          p_status: string
+        }
+        Returns: Json
+      }
+      admin_update_order: {
+        Args: {
+          p_note?: string | null
+          p_order_id: string
+          p_shipping_status?: string | null
+          p_status?: string | null
+          p_tracking_number?: string | null
+        }
+        Returns: Json
+      }
+      cancel_account_deletion: { Args: Record<string, never>; Returns: Json }
+      cancel_order: { Args: { p_order_id: string; p_reason?: string | null }; Returns: Json }
+      export_my_data: { Args: Record<string, never>; Returns: Json }
+      place_order: {
+        Args: {
+          p_billing_address?: Json | null
+          p_discount_code?: string | null
+          p_email?: string | null
+          p_idempotency_key?: string | null
+          p_items: Json
+          p_note?: string | null
+          p_payment_provider?: string | null
+          p_phone?: string | null
+          p_shipping_address: Json
+          p_shipping_method?: string | null
+        }
+        Returns: Json
+      }
+      quote_cart: {
+        Args: {
+          p_discount_code?: string | null
+          p_items: Json
+          p_shipping_method?: string | null
+        }
+        Returns: Json
+      }
+      request_account_deletion: { Args: { p_reason?: string | null }; Returns: Json }
+      request_return: {
+        Args: {
+          p_comment?: string | null
+          p_items?: Json | null
+          p_order_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      search_catalog: {
+        Args: { p_limit?: number; p_q: string }
+        Returns: {
+          category: string
+          gradient: string | null
+          id: string
+          image_url: string | null
+          kind: string
+          price_dkk: number | null
+          rank: number
+          slug: string
+          subtitle: string | null
+          title: string
+        }[]
+      }
+      submit_contact_message: {
+        Args: {
+          p_body: string
+          p_email: string
+          p_name: string
+          p_order_no?: string | null
+          p_subject: string
+        }
+        Returns: Json
+      }
+      subscribe_newsletter: { Args: { p_email: string; p_source?: string | null }; Returns: Json }
+      unsubscribe_newsletter: { Args: { p_token: string }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

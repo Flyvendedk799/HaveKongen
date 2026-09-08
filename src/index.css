@@ -4,6 +4,7 @@
 @import './styles/landing.css';
 @import './styles/app.css';
 @import './styles/mobile.css';
+@import './styles/shop.css';
 
 @tailwind base;
 @tailwind components;

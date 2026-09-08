@@ -109,13 +109,16 @@ begin
       end if;
     end if;
 
-    -- Availability: an explicit stock_qty wins, otherwise the in_stock flag.
+    -- Availability: a counted item is limited by stock_qty; an uncounted one is
+    -- either freely available or flatly out of stock. NULL means "no ceiling".
     if variant.id is not null then
-      available := variant.stock_qty;
-      if available is null and not variant.in_stock then available := 0; end if;
+      if variant.track_inventory then available := variant.stock_qty;
+      elsif not variant.in_stock then available := 0;
+      else available := null; end if;
     else
-      available := prod.stock_qty;
-      if available is null and not prod.in_stock then available := 0; end if;
+      if prod.track_inventory then available := prod.stock_qty;
+      elsif not prod.in_stock then available := 0;
+      else available := null; end if;
     end if;
 
     if available is not null and available <= 0 then
@@ -382,12 +385,12 @@ begin
       update public.product_variants
          set stock_qty = stock_qty - (line->>'qty')::int
        where id = (line->>'variant_id')::uuid
-         and stock_qty is not null
+         and track_inventory
          and stock_qty >= (line->>'qty')::int;
       get diagnostics touched = row_count;
       if touched = 0 and exists (
         select 1 from public.product_variants
-         where id = (line->>'variant_id')::uuid and stock_qty is not null) then
+         where id = (line->>'variant_id')::uuid and track_inventory) then
         raise exception 'insufficient_stock' using errcode = '23514',
           detail = line->>'name';
       end if;
@@ -401,12 +404,12 @@ begin
          set stock_qty = stock_qty - (line->>'qty')::int,
              in_stock = (stock_qty - (line->>'qty')::int) > 0
        where id = (line->>'product_id')::uuid
-         and stock_qty is not null
+         and track_inventory
          and stock_qty >= (line->>'qty')::int;
       get diagnostics touched = row_count;
       if touched = 0 and exists (
         select 1 from public.products
-         where id = (line->>'product_id')::uuid and stock_qty is not null) then
+         where id = (line->>'product_id')::uuid and track_inventory) then
         raise exception 'insufficient_stock' using errcode = '23514',
           detail = line->>'name';
       end if;
@@ -477,11 +480,11 @@ begin
   for it in select * from public.order_items where order_id = p_order_id loop
     if it.variant_id is not null then
       update public.product_variants set stock_qty = stock_qty + it.qty
-       where id = it.variant_id and stock_qty is not null;
+       where id = it.variant_id and track_inventory;
     elsif it.product_id is not null then
       update public.products
          set stock_qty = stock_qty + it.qty, in_stock = true
-       where id = it.product_id and stock_qty is not null;
+       where id = it.product_id and track_inventory;
     end if;
     insert into public.inventory_movements (product_id, variant_id, order_id, delta, reason, actor_id)
     values (it.product_id, it.variant_id, p_order_id, it.qty, p_reason, p_actor);

@@ -12,10 +12,15 @@
 
 -- ---------------------------------------------------------------- catalogue --
 
+-- product_variants already carried the (stock_qty, track_inventory) pair from
+-- the v1 admin work; products get the same two columns so one rule covers both:
+-- track_inventory decides whether stock_qty means anything, and when it is off
+-- the in_stock boolean is still honoured.
 alter table public.products
   add column if not exists sku text,
-  add column if not exists stock_qty int,                       -- null = untracked
-  add column if not exists low_stock_threshold int not null default 3,
+  add column if not exists stock_qty int not null default 0,
+  add column if not exists track_inventory boolean not null default false,
+  add column if not exists low_stock_threshold int not null default 5,
   add column if not exists vat_rate numeric(4,3) not null default 0.250,
   add column if not exists active boolean not null default true,
   add column if not exists rating_avg numeric(3,2) not null default 0,
@@ -27,8 +32,9 @@ create unique index if not exists products_sku_key on public.products (sku) wher
 create index if not exists products_category_idx on public.products (category) where active;
 
 alter table public.product_variants
-  add column if not exists stock_qty int,
-  add column if not exists low_stock_threshold int not null default 3,
+  add column if not exists stock_qty int not null default 0,
+  add column if not exists track_inventory boolean not null default false,
+  add column if not exists low_stock_threshold int not null default 5,
   add column if not exists weight_grams int,
   add column if not exists position int not null default 0;
 
