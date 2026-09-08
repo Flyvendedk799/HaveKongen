@@ -355,6 +355,46 @@ begin
   perform hk_assert(v->>'ok', 'true', 'a real message goes through');
 end $$;
 
+-- ------------------------------------------------------------ mower specs ---
+
+\echo '── mower specs'
+
+do $$
+declare rejected boolean;
+begin
+  -- A complete spec is accepted.
+  update public.products
+     set mower_specs = '{"maxAreaM2":600,"maxSlopePct":35,"minPassageCm":60}'::jsonb
+   where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  perform hk_assert(
+    (select (mower_specs->>'maxAreaM2') from public.products where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    '600', 'a complete mower spec is stored');
+
+  -- A half-filled one is refused rather than silently dropping the product out
+  -- of the recommendations.
+  rejected := false;
+  begin
+    update public.products set mower_specs = '{"maxAreaM2":600}'::jsonb
+     where id = 'aaaaaaaa-0000-0000-0000-000000000002';
+  exception when check_violation then rejected := true;
+  end;
+  perform hk_assert_true(rejected, 'an incomplete mower spec is refused');
+
+  -- So is a nonsensical slope.
+  rejected := false;
+  begin
+    update public.products
+       set mower_specs = '{"maxAreaM2":600,"maxSlopePct":250,"minPassageCm":60}'::jsonb
+     where id = 'aaaaaaaa-0000-0000-0000-000000000002';
+  exception when check_violation then rejected := true;
+  end;
+  perform hk_assert_true(rejected, 'an out-of-range slope is refused');
+
+  perform hk_assert(
+    (select count(*)::text from public.products where mower_specs is null),
+    '2', 'non-mower products keep a null spec');
+end $$;
+
 -- ------------------------------------------------------------------- GDPR ---
 
 \echo '── GDPR'

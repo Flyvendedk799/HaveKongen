@@ -784,3 +784,127 @@
   .consent-actions { width: 100%; }
   .consent-actions .btn { flex: 1 1 auto; justify-content: center; }
 }
+
+/* ─────────────────────────────────────── mower recommendation ─────────────
+   Lives in Havemåler step 2's side panel. Recomputes live as obstacles are
+   confirmed, so it has to stay readable at narrow widths. */
+.mower-rec { margin-bottom: 18px; }
+.mower-rec__head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  color: var(--forest-700);
+}
+.mower-rec__head strong { display: block; font-size: 14px; }
+.mower-rec__head span { display: block; font-size: 11.5px; color: var(--ink-500); line-height: 1.5; margin-top: 2px; }
+
+.mower-rec__facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgba(20, 39, 29, 0.08);
+  border: 1px solid rgba(20, 39, 29, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 0 0 12px;
+}
+.mower-fact { background: var(--paper); padding: 8px 10px; }
+.mower-fact dt { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-500); margin: 0; }
+.mower-fact dd { margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+.mower-fact.is-muted dd { color: var(--ink-300); }
+
+.mower-rec__note {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-500);
+  margin: 0 0 8px;
+}
+.mower-rec__note svg { flex: 0 0 auto; margin-top: 2px; }
+
+.mower-rec__verdict {
+  font-size: 12px;
+  color: var(--ink-700);
+  margin: 12px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(20, 39, 29, 0.08);
+}
+
+.mower-rec__empty {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-500);
+  background: var(--mist-50);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.mower-rec__empty svg { flex: 0 0 auto; margin-top: 1px; }
+
+.mower-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.mower-row {
+  border: 1px solid rgba(20, 39, 29, 0.12);
+  border-left-width: 3px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--paper);
+}
+.mower-row.is-good { border-left-color: var(--forest-600); }
+.mower-row.is-tight { border-left-color: var(--gold-600); }
+.mower-row.is-bad { border-left-color: rgba(164, 67, 44, 0.5); opacity: 0.78; }
+
+.mower-row__head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.mower-row__name { font-size: 13.5px; font-weight: 500; color: var(--ink-900); text-decoration: none; }
+.mower-row__name:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.mower-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mower-badge.is-good { background: rgba(40, 72, 54, 0.12); color: var(--forest-600); }
+.mower-badge.is-tight { background: rgba(200, 148, 65, 0.18); color: var(--gold-700); }
+.mower-badge.is-bad { background: rgba(164, 67, 44, 0.1); color: #a4432c; }
+
+.mower-row__meta { font-size: 11px; color: var(--ink-500); margin-top: 3px; }
+.mower-row__reasons { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.mower-row__reasons li { font-size: 11.5px; line-height: 1.5; padding-left: 12px; position: relative; }
+.mower-row__reasons li::before { content: "·"; position: absolute; left: 3px; }
+.mower-row__reasons .tone-good { color: var(--ink-500); }
+.mower-row__reasons .tone-warn { color: var(--gold-700); }
+.mower-row__reasons .tone-bad { color: #a4432c; }
+
+.mower-row__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 9px;
+  font-size: 11.5px;
+  color: var(--forest-700);
+  text-decoration: none;
+}
+.mower-row__cta:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.mower-rec__more {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--forest-700);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

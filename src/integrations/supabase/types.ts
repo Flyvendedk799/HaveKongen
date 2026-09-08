@@ -1542,6 +1542,7 @@ export type Database = {
           in_stock: boolean
           low_stock_threshold: number
           meta: string | null
+          mower_specs: Json | null
           name: string
           rating_avg: number
           rating_count: number
@@ -1568,6 +1569,7 @@ export type Database = {
           in_stock?: boolean
           low_stock_threshold?: number
           meta?: string | null
+          mower_specs?: Json | null
           name: string
           rating_avg?: number
           rating_count?: number
@@ -1594,6 +1596,7 @@ export type Database = {
           in_stock?: boolean
           low_stock_threshold?: number
           meta?: string | null
+          mower_specs?: Json | null
           name?: string
           rating_avg?: number
           rating_count?: number

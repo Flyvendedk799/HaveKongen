@@ -10,12 +10,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import type { Json } from "@/integrations/supabase/types";
+import type { MowerSpec } from "@/lib/mowerFit";
 
 type Product = {
   id: string; name: string; slug: string; category: string;
   base_price_dkk: number; in_stock: boolean; featured: boolean;
   description: string | null; short_description: string | null;
   image_url: string | null; gradient: string | null; svg_art: string | null; meta: string | null;
+  mower_specs: MowerSpec | null;
 };
 type Variant = {
   id: string; product_id: string; name: string; sku: string | null;
@@ -46,7 +49,10 @@ export default function AdminProductEditor() {
       supabase.from("product_variants").select("*").eq("product_id", id).order("name"),
       supabase.from("product_media").select("*").eq("product_id", id).order("sort"),
     ]);
-    setP(prod as Product | null);
+    // mower_specs is Json in the generated types; the shape is guaranteed by a
+    // check constraint on the column, so narrow it here rather than defensively
+    // parsing it in every consumer.
+    setP(prod as unknown as Product | null);
     setVariants((vs ?? []) as Variant[]);
     setMedia((ms ?? []) as Media[]);
   }
@@ -66,6 +72,7 @@ export default function AdminProductEditor() {
       base_price_dkk: p.base_price_dkk, in_stock: p.in_stock, featured: p.featured,
       description: p.description, short_description: p.short_description,
       image_url: p.image_url, gradient: p.gradient, svg_art: p.svg_art, meta: p.meta,
+      mower_specs: (p.mower_specs ?? null) as unknown as Json,
     }).eq("id", p.id);
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -183,6 +190,16 @@ export default function AdminProductEditor() {
                 <Input type="number" value={p.base_price_dkk} onChange={(e) => update("base_price_dkk", Number(e.target.value))} />
               </div>
             </div>
+            {/* Havemåler step 2 matches a measured garden against these numbers.
+                Without them the product cannot be recommended at all, so the
+                section shows up as soon as the category is a mower. */}
+            {p.category === "robot" && (
+              <MowerSpecFields
+                specs={p.mower_specs}
+                onChange={(next) => update("mower_specs", next as Product["mower_specs"])}
+              />
+            )}
+
             <div>
               <Label>Kort beskrivelse</Label>
               <Textarea rows={2} value={p.short_description ?? ""} onChange={(e) => update("short_description", e.target.value)} />
@@ -291,5 +308,132 @@ export default function AdminProductEditor() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Robot mower capability, matched against a measured garden in Havemåler step 2.
+ *
+ * The three required numbers are what decide whether a machine can do a given
+ * garden at all; the rest sharpen the wording of the recommendation. A spec
+ * missing any of the three is rejected by a check constraint rather than
+ * silently dropping the product out of the results.
+ */
+function MowerSpecFields({
+  specs,
+  onChange,
+}: {
+  specs: MowerSpec | null;
+  onChange: (next: MowerSpec | null) => void;
+}) {
+  const enabled = specs != null;
+
+  const set = (patch: Partial<MowerSpec>) =>
+    onChange({ maxAreaM2: 500, maxSlopePct: 35, minPassageCm: 60, ...specs, ...patch });
+
+  return (
+    <Card className="p-4 space-y-4 border-dashed">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-medium">Robotklipper-specifikationer</h3>
+          <p className="text-sm text-muted-foreground">
+            Bruges til at anbefale modellen ud fra kundens opmålte have. Uden disse tal kan
+            produktet ikke anbefales.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm shrink-0">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) =>
+              onChange(e.target.checked ? { maxAreaM2: 500, maxSlopePct: 35, minPassageCm: 60 } : null)
+            }
+          />
+          Aktiv
+        </label>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <Label>Maks. areal (m²) *</Label>
+              <Input
+                type="number"
+                min={1}
+                value={specs.maxAreaM2}
+                onChange={(e) => set({ maxAreaM2: Number(e.target.value) })}
+              />
+            </div>
+            <div>
+              <Label>Maks. hældning (%) *</Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={specs.maxSlopePct}
+                onChange={(e) => set({ maxSlopePct: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground mt-1">Producentens tal, fx 35 for 35%.</p>
+            </div>
+            <div>
+              <Label>Smalleste passage (cm) *</Label>
+              <Input
+                type="number"
+                min={10}
+                max={200}
+                value={specs.minPassageCm}
+                onChange={(e) => set({ minPassageCm: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground mt-1">Typisk 60-75 cm.</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <Label>Antal zoner</Label>
+              <Input
+                type="number"
+                min={1}
+                value={specs.zones ?? 1}
+                onChange={(e) => set({ zones: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground mt-1">Adskilte græsflader den selv kan nå.</p>
+            </div>
+            <div>
+              <Label>Klippebredde (cm)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={specs.cuttingWidthCm ?? ""}
+                onChange={(e) => set({ cuttingWidthCm: e.target.value ? Number(e.target.value) : undefined })}
+              />
+            </div>
+            <div>
+              <Label>Forhindringer</Label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={specs.obstacleAvoidance ?? "bump"}
+                onChange={(e) => set({ obstacleAvoidance: e.target.value as MowerSpec["obstacleAvoidance"] })}
+              >
+                <option value="bump">Støder ind i dem</option>
+                <option value="sensor">Sensorer</option>
+                <option value="camera">Kamera</option>
+                <option value="lidar">LiDAR</option>
+              </select>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={Boolean(specs.needsGuideWire)}
+              onChange={(e) => set({ needsGuideWire: e.target.checked })}
+            />
+            Kræver begrænsningskabel
+          </label>
+        </>
+      )}
+    </Card>
   );
 }
