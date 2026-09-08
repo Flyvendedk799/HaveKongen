@@ -220,7 +220,7 @@ Deno.serve(async (req: Request) => {
     }
 
     let bytes: Uint8Array;
-    const imagerySource: "dataforsyningen" = "dataforsyningen";
+    const imagerySource = "dataforsyningen" as const;
     try {
       bytes = await fetchImageBytes(dataforsyningenUrl(bbox, width, height, dataforsyningenToken), 2, 5200);
     } catch (e) {

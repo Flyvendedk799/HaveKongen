@@ -564,14 +564,14 @@ Deno.serve(async (req: Request) => {
       const model = m.id;
       const result = await callModel(model, buildPrompt(width, height, px, py, { hint, parcelPixels }), b64, aiKey, m.timeout);
       if (!result.ok) { lastFailure = result; lastError = `${model}: ${result.detail}`; continue; }
-      let parsed = parseJson(result.content);
+      const parsed = parseJson(result.content);
       if (!parsed) {
         console.warn(`[${model}] unparseable response (first 400 chars):`, result.content.slice(0, 400));
         lastFailure = { ok: false, code: "ai_bad_response", status: 502, detail: "AI response was not valid JSON" };
         lastError = `${model}: unparseable response`;
         continue;
       }
-      let candidate = candidateFromParsed(parsed, width, height, px, py, [minLng, minLat, maxLng, maxLat], clat, parcelPixels);
+      const candidate = candidateFromParsed(parsed, width, height, px, py, [minLng, minLat, maxLng, maxLat], clat, parcelPixels);
       if (!candidate.ok) {
         if (candidate.noLawn) {
           noLawnNote = candidate.detail;

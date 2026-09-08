@@ -88,7 +88,7 @@ export default function JournalTab({
     setLoading(false);
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [user?.id, gardenId]);
+  useEffect(() => { load();   }, [user?.id, gardenId]);
 
   const filtered = useMemo(() => {
     return entries.filter(e => {

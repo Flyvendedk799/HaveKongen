@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch supersedes the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` fails loudly if package-lock.json and package.json disagree,
+      # which is exactly what we want in CI.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      # The build is the last gate: it catches import cycles and missing files
+      # that tsc --noEmit does not.
+      - name: Build
+        run: npm run build
+        env:
+          # Vite inlines these at build time. CI has no project, so it builds
+          # against placeholders — enough to prove the bundle compiles.
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-key
+          VITE_SUPABASE_PROJECT_ID: ci
+
+  migrations:
+    name: Migrations apply cleanly
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # A real Postgres, so the SQL is executed rather than eyeballed. This is the
+    # only place the PL/pgSQL function bodies get compiled before production.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: havekongen_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare a Supabase-shaped database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql
+
+      - name: Apply every migration in order
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          for f in supabase/migrations/*.sql; do
+            echo "── $f"
+            psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Check the pricing engine against known baskets
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -f supabase/tests/pricing_test.sql

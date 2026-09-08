@@ -122,7 +122,7 @@ ${JSON.stringify({
 })}`;
 
     // Tool execution loop (non-streaming until tools resolved, then stream final answer)
-    let convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
+    const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
 
     for (let i = 0; i < 4; i++) {
       const r = await fetch("https://api.openai.com/v1/chat/completions", {

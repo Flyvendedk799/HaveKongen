@@ -7,7 +7,40 @@ import type { Tables } from "@/integrations/supabase/types";
  * before the event log existed.
  */
 
-type Step = { key: string; label: string; at: string | null; note?: string };
+export type Step = { key: string; label: string; at: string | null; note?: string };
+
+export type TimelineOrder = Pick<
+  Tables<"orders">,
+  "created_at" | "placed_at" | "paid_at" | "shipped_at" | "delivered_at" | "cancelled_at" | "refunded_at" | "status"
+>;
+
+/**
+ * Turn an order's milestone timestamps into the steps to draw.
+ *
+ * A cancelled order does not show "afventer betaling" for a payment that will
+ * never come — it collapses to received → cancelled. Extracted from the
+ * component so the branching is unit-testable.
+ */
+export function deriveSteps(order: TimelineOrder): { steps: Step[]; nextIndex: number } {
+  const cancelled = Boolean(order.cancelled_at) || order.status === "cancelled";
+
+  const steps: Step[] = cancelled
+    ? [
+        { key: "placed", label: "Modtaget", at: order.placed_at ?? order.created_at },
+        { key: "cancelled", label: "Annulleret", at: order.cancelled_at },
+      ]
+    : [
+        { key: "placed", label: "Modtaget", at: order.placed_at ?? order.created_at },
+        { key: "paid", label: "Betalt", at: order.paid_at },
+        { key: "shipped", label: "Afsendt", at: order.shipped_at },
+        { key: "delivered", label: "Leveret", at: order.delivered_at },
+      ];
+
+  if (order.refunded_at) steps.push({ key: "refunded", label: "Refunderet", at: order.refunded_at });
+
+  // The first step without a timestamp is the one we are waiting on.
+  return { steps, nextIndex: steps.findIndex((s) => !s.at) };
+}
 
 const EVENT_LABELS: Record<string, string> = {
   order_placed: "Ordre modtaget",
@@ -31,34 +64,8 @@ const fmt = (iso: string | null) =>
       )
     : null;
 
-export function OrderTimeline({
-  order,
-  events,
-}: {
-  order: Pick<
-    Tables<"orders">,
-    "created_at" | "placed_at" | "paid_at" | "shipped_at" | "delivered_at" | "cancelled_at" | "refunded_at" | "status"
-  >;
-  events: Tables<"order_events">[];
-}) {
-  const cancelled = Boolean(order.cancelled_at) || order.status === "cancelled";
-
-  const steps: Step[] = cancelled
-    ? [
-        { key: "placed", label: "Modtaget", at: order.placed_at ?? order.created_at },
-        { key: "cancelled", label: "Annulleret", at: order.cancelled_at },
-      ]
-    : [
-        { key: "placed", label: "Modtaget", at: order.placed_at ?? order.created_at },
-        { key: "paid", label: "Betalt", at: order.paid_at },
-        { key: "shipped", label: "Afsendt", at: order.shipped_at },
-        { key: "delivered", label: "Leveret", at: order.delivered_at },
-      ];
-
-  if (order.refunded_at) steps.push({ key: "refunded", label: "Refunderet", at: order.refunded_at });
-
-  // The first step without a timestamp is the one we are waiting on.
-  const nextIndex = steps.findIndex((s) => !s.at);
+export function OrderTimeline({ order, events }: { order: TimelineOrder; events: Tables<"order_events">[] }) {
+  const { steps, nextIndex } = deriveSteps(order);
 
   return (
     <div className="order-timeline">

@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
   let instructions: Record<string, unknown> | null = null;
   let redirectUrl: string | null = null;
   let reference: string | null = null;
-  let paymentStatus = "requires_action";
+  const paymentStatus = "requires_action";
 
   if (provider === "invoice") {
     const { data: setting } = await sb

@@ -46,7 +46,7 @@ function write(events: AnalyticsEvent[]) {
 export function track(name: string, props?: Record<string, unknown>) {
   if (!OPERATIONAL.has(name) && !hasConsent("analytics")) {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
+       
       console.debug("[analytics] dropped (no consent)", name);
     }
     return;
@@ -67,7 +67,7 @@ export function track(name: string, props?: Record<string, unknown>) {
   }
 
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
+     
     console.debug("[analytics]", name, props ?? {});
   }
 }
