@@ -48,7 +48,6 @@ const AdminContent = lazy(() => import("./pages/admin/AdminContent.tsx"));
 const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications.tsx"));
 const AdminAnalytics = lazy(() => import("./pages/admin/AdminAnalytics.tsx"));
 const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
-const AdminStub = lazy(() => import("./pages/admin/AdminStub.tsx").then((m) => ({ default: m.AdminStub })));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews.tsx"));
 const AdminInbox = lazy(() => import("./pages/admin/AdminInbox.tsx"));
 const AdminDiscounts = lazy(() => import("./pages/admin/AdminDiscounts.tsx"));

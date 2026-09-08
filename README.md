@@ -53,6 +53,13 @@ Supabase.
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | `.env` | Anon key. Safe in the browser — RLS is what protects the data. |
 | `VITE_SUPABASE_PROJECT_ID` | `.env` | Used by the Supabase CLI |
 
+> `.env` is currently tracked in git. That is safe as far as it goes — all three
+> values are compiled into the browser bundle regardless — but it is a trap: the
+> next person to put a real secret in that file will commit it. Untracking it
+> needs the deploy to supply the variables first, so it is deliberately left for
+> a follow-up rather than done blind here. **Never put a service-role key, an
+> API key or a webhook secret in `.env`.**
+
 Edge function secrets (set with `supabase secrets set`):
 
 | Variable | Required for | If missing |

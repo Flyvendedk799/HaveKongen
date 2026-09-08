@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useCart } from "@/lib/cart";
 import { useCommandPalette } from "@/components/CommandPalette";
 import { useConsent } from "@/lib/consent";
+import { NewsletterSignup } from "@/components/NewsletterSignup";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { supabase } from "@/integrations/supabase/client";
 import { ShoppingCart, Search, User as UserIcon } from "lucide-react";
@@ -135,6 +136,7 @@ export function SiteFooter() {
             <p style={{ color: "rgba(237,232,223,0.6)", fontSize: 14, maxWidth: 320, lineHeight: 1.6 }}>
               Lev din have. Fra det første frø, til årets sidste blad.
             </p>
+            <NewsletterSignup />
           </div>
           <div className="footer-col">
             <h4>Webshop</h4>
