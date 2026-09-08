@@ -18,19 +18,38 @@ const CONFIGURED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
   .map((o) => o.trim())
   .filter(Boolean);
 
-const DEFAULT_ORIGINS = [
-  "https://havekongen.dk",
-  "https://www.havekongen.dk",
-];
-
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
+let warnedUnconfigured = false;
+
+/**
+ * Origin allowlisting is opt-in via ALLOWED_ORIGINS.
+ *
+ * When it is not set we allow the request and log once. Falling back to a
+ * hard-coded guess at the production domain would silently 403 every preview
+ * deploy, every staging host and every renamed domain — turning a missing
+ * environment variable into "the map is broken and nothing says why". The
+ * variable is the control; its absence means "not configured yet", not "block
+ * the world". Same fail-open-and-say-so rule as the rate limiter and the AI
+ * budgets.
+ */
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return true; // server-to-server calls carry no Origin header
   if (LOCAL_ORIGIN.test(origin)) return true;
-  const allowed = CONFIGURED_ORIGINS.length ? CONFIGURED_ORIGINS : DEFAULT_ORIGINS;
-  if (allowed.includes("*")) return true;
-  return allowed.includes(origin);
+
+  if (CONFIGURED_ORIGINS.length === 0) {
+    if (!warnedUnconfigured) {
+      warnedUnconfigured = true;
+      console.warn(
+        "[cors] ALLOWED_ORIGINS is not set — accepting every origin. " +
+          "Set it to the site's domains to enable the allowlist.",
+      );
+    }
+    return true;
+  }
+
+  if (CONFIGURED_ORIGINS.includes("*")) return true;
+  return CONFIGURED_ORIGINS.includes(origin);
 }
 
 export function corsHeaders(req: Request): Record<string, string> {

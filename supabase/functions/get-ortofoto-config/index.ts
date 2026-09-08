@@ -34,7 +34,8 @@ function publicOrigin(req: Request): string | null {
 
 const TILE_PATH = "/functions/v1/ortofoto-tile?width=512&height=512&bbox={bbox-epsg-3857}";
 
-Deno.serve((req: Request) => {
+// async because the guard awaits the shared rate limiter.
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const guarded = await guard(req, { fn: "get-ortofoto-config", limit: 120, windowSeconds: 60, skipIdentity: true });
