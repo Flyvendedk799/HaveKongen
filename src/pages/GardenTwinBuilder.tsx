@@ -58,6 +58,7 @@ import {
 } from "@/lib/gardenElevation";
 import {
   BUILDER_PALETTE,
+  COMMON_TYPES,
   OBJECT_SPECS,
   applyHandleDrag,
   clampHeight,
@@ -152,7 +153,8 @@ export default function GardenTwinBuilder() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [placingType, setPlacingType] = useState<BuilderObjectType | null>(null);
   const [lineStart, setLineStart] = useState<LngLat | null>(null);
-  const [view, setView] = useState<"map" | "3d">("map");
+  const [view, setView] = useState<"map" | "split" | "3d">("split");
+  const [showAllTypes, setShowAllTypes] = useState(false);
 
   // Auto-detected objects waiting for the user's accept/dismiss verdict.
   const [suggestions, setSuggestions] = useState<ObjectSuggestion[]>([]);
@@ -167,6 +169,7 @@ export default function GardenTwinBuilder() {
   const [handleTick, setHandleTick] = useState(0);
 
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapPaneRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<string | null>(null);
   // Active transform-handle drag (resize/rotate/endpoint) on the selected object.
@@ -197,6 +200,18 @@ export default function GardenTwinBuilder() {
   const selectedSuggestion = suggestions.find((suggestion) => suggestion.id === selectedSuggestionId) ?? null;
   const summary = model ? summarizeDepthModel(model) : null;
   const slope = useMemo(() => (elevation ? terrainSlopeStats(elevation) : null), [elevation]);
+
+  // The map pane changes width when the view switches between map / split / 3d,
+  // and MapLibre does not notice on its own — without this it keeps rendering at
+  // the old size and the imagery comes out stretched and mis-registered against
+  // the drawn polygons.
+  useEffect(() => {
+    const pane = mapPaneRef.current;
+    if (!pane) return;
+    const observer = new ResizeObserver(() => mapRef.current?.resize());
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, []);
 
   // ----- Imagery config -----
   useEffect(() => {
@@ -817,7 +832,7 @@ export default function GardenTwinBuilder() {
   function focusSuggestion(suggestion: ObjectSuggestion) {
     setSelectedSuggestionId(suggestion.id);
     setSelectedId(null);
-    setView("map");
+    setView("split");
     mapRef.current?.easeTo({ center: suggestion.center, duration: 450 });
   }
 
@@ -1012,7 +1027,7 @@ export default function GardenTwinBuilder() {
 
   // ----- Contextual help text on the map -----
   function helpText(): string {
-    if (view === "3d") return "Træk for at dreje. 3D-haven viser rigtige højder og terrænfald.";
+    if (view === "3d") return "Træk for at dreje haven. Skift til Kort eller Delt for at placere.";
     if (placingType) {
       const spec = OBJECT_SPECS[placingType];
       if (spec.placement === "line") {
@@ -1101,8 +1116,27 @@ export default function GardenTwinBuilder() {
               </div>
               <div className="topview-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div className="imagery-toggle" style={{ display: "flex", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", fontSize: 12 }}>
-                  <button onClick={() => setView("map")} style={{ padding: "6px 10px", background: view === "map" ? "var(--gold)" : "transparent", color: view === "map" ? "#14271d" : "inherit", border: 0 }}>Placér</button>
-                  <button onClick={() => setView("3d")} style={{ padding: "6px 10px", background: view === "3d" ? "var(--gold)" : "transparent", color: view === "3d" ? "#14271d" : "inherit", border: 0 }}>3D</button>
+                  {([
+                    { key: "map", label: "Kort" },
+                    { key: "split", label: "Delt" },
+                    { key: "3d", label: "3D" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setView(option.key)}
+                      aria-pressed={view === option.key}
+                      style={{
+                        padding: "6px 10px",
+                        background: view === option.key ? "var(--gold)" : "transparent",
+                        color: view === option.key ? "#14271d" : "inherit",
+                        border: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
                 <Link to={`/havemaaler?garden=${garden?.id ?? ""}`} className="change-addr">Tilbage til måling</Link>
               </div>
@@ -1110,16 +1144,21 @@ export default function GardenTwinBuilder() {
 
             <div className="sizer-layout">
               <div>
-                <div className="canvas-host topview" style={{ position: "relative" }}>
-                  <div ref={containerRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0, borderRadius: "inherit", opacity: view === "map" ? 1 : 0, pointerEvents: view === "map" ? "auto" : "none" }} />
-                  {view === "3d" && <GardenTwinViewer model={model} selectedId={selectedId} className="garden-twin-map-overlay" />}
+                {/* Map and twin sit side by side rather than being mutually
+                    exclusive modes. Placing on the aerial photo is the accurate
+                    way to position things, and seeing the result appear next to
+                    it is the whole point of a twin — before this you had to
+                    switch away from your work to look at it. */}
+                <div className={`canvas-host topview builder-stage is-${view}`}>
+                  <div className="builder-stage__map" ref={mapPaneRef}>
+                    <div ref={containerRef} className="builder-stage__map-canvas" />
 
                   <div className="help" style={{ zIndex: 2 }}>
                     <span className="dot" />
                     <span>{helpText()}</span>
                   </div>
 
-                  {(elevationStatus === "loading" || detecting) && view === "map" && (
+                  {(elevationStatus === "loading" || detecting) && view !== "3d" && (
                     <div className="builder-scan-banner" style={{ zIndex: 2 }}>
                       <Loader2 size={14} className="spin" />
                       <span>{detecting ? "Leder efter træer, hække og skure…" : "Henter Danmarks Højdemodel…"}</span>
@@ -1137,9 +1176,16 @@ export default function GardenTwinBuilder() {
                     </div>
                     {elevation && <div style={{ marginTop: 4, fontSize: 10, color: "var(--gold)", letterSpacing: 0.5 }}>{slopeLabel(elevation.stats.reliefM)}{slope ? ` · maks ${slope.maxSlopePct}%` : ""} · DHM</div>}
                   </div>
+                  </div>
+
+                  {view !== "map" && (
+                    <div className="builder-stage__twin">
+                      <GardenTwinViewer model={model} selectedId={selectedId} />
+                    </div>
+                  )}
                 </div>
 
-                {view === "map" && (
+                {view !== "3d" && (
                   <>
                   <div className="builder-toolbar">
                     <button className="tool-btn is-active" onClick={() => void runDetection(false)} disabled={detecting || elevationStatus === "loading"} title="Find træer, hække og skure automatisk fra Danmarks Højdemodel">
@@ -1149,7 +1195,10 @@ export default function GardenTwinBuilder() {
                     <button className="tool-btn" onClick={redo} disabled={!canRedo} title="Gentag (Cmd+Shift+Z)"><Redo2 size={14} /></button>
                   </div>
                   <div className="builder-palette" style={{ zIndex: 2 }}>
-                    {BUILDER_PALETTE.map((type) => {
+                    {/* Eleven undifferentiated buttons made every placement feel
+                        like a lookup. The five that account for almost every
+                        garden lead; the rest are one click away. */}
+                    {(showAllTypes ? BUILDER_PALETTE : COMMON_TYPES).map((type) => {
                       const spec = OBJECT_SPECS[type];
                       return (
                         <button
@@ -1164,7 +1213,29 @@ export default function GardenTwinBuilder() {
                         </button>
                       );
                     })}
+                    <button
+                      type="button"
+                      className="tool-btn builder-palette-more"
+                      onClick={() => setShowAllTypes((v) => !v)}
+                    >
+                      {showAllTypes ? "Færre" : "Flere…"}
+                    </button>
                   </div>
+
+                  {placingType && (
+                    <div className="builder-placing-hint" role="status">
+                      <span className="swatch" style={{ background: OBJECT_SPECS[placingType].color }} />
+                      <span>
+                        <strong>{OBJECT_SPECS[placingType].label}</strong>
+                        {OBJECT_SPECS[placingType].placement === "line"
+                          ? " — klik hvor den starter, og igen hvor den slutter."
+                          : ` — klik på kortet. Standard ${OBJECT_SPECS[placingType].widthM} × ${OBJECT_SPECS[placingType].depthM} m, træk i hjørnerne bagefter.`}
+                      </span>
+                      <button type="button" onClick={() => setPlacingType(null)} aria-label="Afbryd placering">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
                   </>
                 )}
 
@@ -1172,8 +1243,8 @@ export default function GardenTwinBuilder() {
                   <button className="tool-btn scan-primary" onClick={save} disabled={saving || !model}>
                     <Save size={14} /> {saving ? "Gemmer…" : dirty || !savedAt ? "Gem 3D-have" : "Gemt ✓"}
                   </button>
-                  <button className="tool-btn" onClick={() => setView(view === "3d" ? "map" : "3d")}>
-                    <Layers3 size={14} /> {view === "3d" ? "Placér objekter" : "Vis i 3D"}
+                  <button className="tool-btn" onClick={() => setView(view === "3d" ? "split" : "3d")}>
+                    <Layers3 size={14} /> {view === "3d" ? "Tilbage til kortet" : "Se haven i 3D"}
                   </button>
                   {elevationStatus !== "ready" ? (
                     <button className="tool-btn" onClick={() => loadElevation(false)} disabled={elevationStatus === "loading"}>
