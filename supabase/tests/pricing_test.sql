@@ -167,7 +167,7 @@ do $$
 declare
   res jsonb;
   replay jsonb;
-  order_id uuid;
+  placed_order uuid;
 begin
   res := public.place_order(
     p_items => '[{"product_id":"aaaaaaaa-0000-0000-0000-000000000001","qty":2},
@@ -178,27 +178,27 @@ begin
     p_idempotency_key => 'test-key-1');
 
   perform hk_assert(res->>'ok', 'true', 'order is created');
-  order_id := (res->>'order_id')::uuid;
+  placed_order := (res->>'order_id')::uuid;
 
-  perform hk_assert((select total_oere::text from public.orders where id = order_id), '74070',
+  perform hk_assert((select total_oere::text from public.orders where id = placed_order), '74070',
                     'stored total matches the quote');
-  perform hk_assert((select vat_oere::text from public.orders where id = order_id), '14814',
+  perform hk_assert((select vat_oere::text from public.orders where id = placed_order), '14814',
                     'stored moms matches the quote');
-  perform hk_assert((select status from public.orders where id = order_id), 'pending', 'starts unpaid');
+  perform hk_assert((select status from public.orders where id = placed_order), 'pending', 'starts unpaid');
   perform hk_assert_true(
-    (select order_no ~ '^HK-\d{6}-\d{5}$' from public.orders where id = order_id),
+    (select order_no ~ '^HK-\d{6}-\d{5}$' from public.orders where id = placed_order),
     'order number is human-readable');
 
-  perform hk_assert((select count(*)::text from public.order_items where order_id = order_id), '2', 'two order lines');
-  perform hk_assert((select count(*)::text from public.payments where order_id = order_id), '1', 'a payment row is opened');
-  perform hk_assert((select count(*)::text from public.order_events where order_id = order_id), '1', 'the placement is logged');
+  perform hk_assert((select count(*)::text from public.order_items where order_id = placed_order), '2', 'two order lines');
+  perform hk_assert((select count(*)::text from public.payments where order_id = placed_order), '1', 'a payment row is opened');
+  perform hk_assert((select count(*)::text from public.order_events where order_id = placed_order), '1', 'the placement is logged');
 
   -- Counted stock went down; uncounted stock did not move.
   perform hk_assert((select stock_qty::text from public.products where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
                     '8', 'counted stock is drawn down');
   perform hk_assert((select stock_qty::text from public.products where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
                     '0', 'uncounted stock is left alone');
-  perform hk_assert((select count(*)::text from public.inventory_movements where order_id = order_id),
+  perform hk_assert((select count(*)::text from public.inventory_movements where order_id = placed_order),
                     '1', 'the movement is recorded');
 
   perform hk_assert((select redemptions::text from public.discount_codes where code = 'TEST10'),
@@ -211,7 +211,7 @@ begin
     p_idempotency_key => 'test-key-1');
 
   perform hk_assert(replay->>'replayed', 'true', 'a repeated submit is a replay');
-  perform hk_assert(replay->>'order_id', order_id::text, 'and returns the original order');
+  perform hk_assert(replay->>'order_id', placed_order::text, 'and returns the original order');
   perform hk_assert((select stock_qty::text from public.products where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
                     '8', 'a replay does not draw stock down twice');
 end $$;
@@ -235,19 +235,19 @@ end $$;
 
 do $$
 declare
-  order_id uuid;
+  placed_order uuid;
   res jsonb;
 begin
-  select id into order_id from public.orders order by created_at desc limit 1;
+  select id into placed_order from public.orders order by created_at desc limit 1;
 
-  res := public.cancel_order(order_id, 'Fortrudt');
+  res := public.cancel_order(placed_order, 'Fortrudt');
   perform hk_assert(res->>'ok', 'true', 'a pending order can be cancelled');
-  perform hk_assert((select status from public.orders where id = order_id), 'cancelled', 'status follows');
+  perform hk_assert((select status from public.orders where id = placed_order), 'cancelled', 'status follows');
   perform hk_assert((select stock_qty::text from public.products where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
                     '10', 'stock goes back on the shelf');
   perform hk_assert((select redemptions::text from public.discount_codes where code = 'TEST10'),
                     '0', 'the discount code is released again');
-  perform hk_assert((select status from public.payments where order_id = order_id), 'cancelled', 'the payment is closed');
+  perform hk_assert((select status from public.payments where order_id = placed_order), 'cancelled', 'the payment is closed');
 end $$;
 
 -- ---------------------------------------------------------------- reviews ---
