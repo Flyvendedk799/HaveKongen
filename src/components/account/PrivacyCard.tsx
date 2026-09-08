@@ -4,6 +4,7 @@ import { Download, Loader2, ShieldCheck, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useConsent } from "@/lib/consent";
+import { invokeFunction } from "@/lib/shop";
 import { toast } from "sonner";
 
 const CONFIRM_PHRASE = "SLET MIN KONTO";
@@ -80,13 +81,9 @@ export function PrivacyCard() {
     }
     setDeleting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("account-delete", {
-        body: { confirm: CONFIRM_PHRASE },
-      });
-      if (error) {
-        const detail = (data as { message?: string } | null)?.message;
-        throw new Error(detail || error.message);
-      }
+      // invokeFunction digs the Danish message out of the response body — the
+      // "you still have 2 open orders" case has to reach the customer.
+      await invokeFunction("account-delete", { confirm: CONFIRM_PHRASE });
       toast.success("Din konto og dine persondata er slettet.");
       await signOut();
       window.location.href = "/";

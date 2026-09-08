@@ -772,3 +772,15 @@
   line-height: 1.6;
   color: rgba(237, 232, 223, 0.75);
 }
+
+/* The banner must never fill a small viewport — a visitor has to be able to
+   reach the page behind it, and both answers must stay on screen. */
+@media (max-height: 560px), (max-width: 620px) {
+  .consent-inner {
+    max-height: 62vh;
+    overflow-y: auto;
+    gap: 16px;
+  }
+  .consent-actions { width: 100%; }
+  .consent-actions .btn { flex: 1 1 auto; justify-content: center; }
+}

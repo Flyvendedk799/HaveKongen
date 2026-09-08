@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { Bird, Ear, Feather, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/lib/shop";
 import { Button } from "@/components/ui/button";
 import {
   bytesToBase64,
@@ -113,17 +114,19 @@ export default function BirdListener({ userId, gardenId }: Props) {
       const samples = concatChunks(recorder.chunks);
       const mono = downsampleBuffer(samples, recorder.context.sampleRate || 48000, TARGET_SAMPLE_RATE);
       const wav = encodeWavPcm16(mono, Math.min(recorder.context.sampleRate || 48000, TARGET_SAMPLE_RATE));
-      const res = await supabase.functions.invoke("identify-bird-audio", {
-        body: {
-          audio: bytesToBase64(wav),
-          format: "wav",
-          durationSeconds: Math.round(elapsedSeconds),
-          context: { garden_id: gardenId },
-        },
-      });
-      if (res.error) throw res.error;
-      const data = (res.data ?? {}) as { birds?: BirdDetection[]; summary?: string; error?: string };
-      if (data.error) throw new Error(data.error);
+      // invokeFunction so a rate-limit or daily-quota rejection reaches the
+      // user as its own message rather than the generic transport one.
+      const data =
+        (await invokeFunction<{ birds?: BirdDetection[]; summary?: string; error?: string; message?: string }>(
+          "identify-bird-audio",
+          {
+            audio: bytesToBase64(wav),
+            format: "wav",
+            durationSeconds: Math.round(elapsedSeconds),
+            context: { garden_id: gardenId },
+          },
+        )) ?? {};
+      if (data.error) throw new Error(data.message ?? data.error);
 
       const birds = Array.isArray(data.birds) ? data.birds : [];
       setDetections(birds);

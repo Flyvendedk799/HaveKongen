@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/lib/shop";
 import { useAuth } from "@/lib/auth";
 import { fileToDataUrl, uploadPlantPhoto } from "@/lib/plantPhotos";
 import { toast } from "sonner";
@@ -57,11 +58,8 @@ export default function IdentifyPlantDialog({
     try {
       // Send a small subset of catalog to help slug matching
       const { data: cat } = await supabase.from("plants_catalog").select("slug,name_da,latin").limit(300);
-      const { data, error } = await supabase.functions.invoke("identify-plant", {
-        body: { image: preview, catalog: cat ?? [] },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
+      const data = await invokeFunction<any>("identify-plant", { image: preview, catalog: cat ?? [] });
+      if ((data as any)?.error) throw new Error((data as any).message ?? (data as any).error);
       const r = data as IdResult;
       setResult(r);
       // Pick first candidate slug if exists in catalog

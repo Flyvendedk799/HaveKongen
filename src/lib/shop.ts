@@ -200,17 +200,35 @@ export type PaymentPrepResult = {
   message?: string;
 };
 
-export async function preparePayment(orderId: string, provider: "invoice" | "stripe"): Promise<PaymentPrepResult> {
-  const { data, error } = await supabase.functions.invoke("checkout-payment", {
-    body: { order_id: orderId, provider },
-  });
-  if (error) {
-    // The function returns a Danish message in its error envelope; surface it
-    // rather than the transport-level "non-2xx status code".
-    const detail = (data as { message?: string } | null)?.message;
-    throw new Error(detail || error.message);
+/**
+ * Call an edge function and surface *its* error message.
+ *
+ * supabase-js reports a non-2xx response as a FunctionsHttpError whose
+ * `message` is only "Edge Function returned a non-2xx status code" — the useful
+ * part is the JSON body, reachable through `error.context`, which is the raw
+ * Response. Without this every guard rejection (rate limited, quota exceeded,
+ * card payments not enabled) reached the user as that same generic string.
+ */
+export async function invokeFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (!error) return data as T;
+
+  const context = (error as { context?: unknown }).context;
+  if (context instanceof Response) {
+    // clone() so the caller could still read the body; a non-JSON body just
+    // falls through to the transport message.
+    const payload = await context
+      .clone()
+      .json()
+      .catch(() => null);
+    const message = payload?.message ?? payload?.error;
+    if (message) throw new Error(String(message));
   }
-  return data as PaymentPrepResult;
+  throw new Error(error.message);
+}
+
+export async function preparePayment(orderId: string, provider: "invoice" | "stripe"): Promise<PaymentPrepResult> {
+  return invokeFunction<PaymentPrepResult>("checkout-payment", { order_id: orderId, provider });
 }
 
 // ------------------------------------------------------------------ orders --

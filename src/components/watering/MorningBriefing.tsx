@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, AlertTriangle, ListChecks, Lightbulb, RefreshCw, CloudSun } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/lib/shop";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -26,9 +27,8 @@ export default function MorningBriefing({ userId }: { userId: string }) {
   async function load(force = false) {
     if (force) setRefreshing(true); else setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("daily-briefing", { body: { force } });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
+      const data = await invokeFunction<any>("daily-briefing", { force });
+      if ((data as any)?.error) throw new Error((data as any).message ?? (data as any).error);
       setBrief((data as any).briefing);
     } catch (e: any) {
       if (!force) {
