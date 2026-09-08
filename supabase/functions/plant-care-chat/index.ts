@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const BASE_PROMPT = `Du er Havekongens Plantepleje AI — en venlig, erfaren havekonsulent for danske haveejere.
@@ -122,6 +123,9 @@ async function buildContext(authHeader: string | null) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "plant-care-chat", requireAuth: true, limit: 30, windowSeconds: 60, aiDailyLimit: 120 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const { messages, hasImage, mode, uiContext, diagnosis, identify, growth } = await req.json();

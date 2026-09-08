@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 type ZoneIn = {
@@ -17,6 +18,9 @@ type ZoneIn = {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "generate-watering-plan", limit: 10, windowSeconds: 60, aiDailyLimit: 30 });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const { zones, lat, lng } = await req.json() as { zones: ZoneIn[]; lat: number; lng: number };
     if (!Array.isArray(zones) || zones.length === 0) {

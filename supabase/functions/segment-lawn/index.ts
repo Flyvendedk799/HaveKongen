@@ -1,3 +1,4 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // segment-lawn v5: fast, parcel-aware lawn segmentation.
 // Design:
 //  - Gemini 2.5 Flash only, with a hard latency budget that fits the browser timeout
@@ -11,7 +12,7 @@ import { rawHttpsGet } from "../_shared/rawHttps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const OPENAI_CHAT_API = "https://api.openai.com/v1/chat/completions";
@@ -425,6 +426,9 @@ async function fetchImageBytes(url: string, attempts = 2, timeoutMs = 6500): Pro
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "segment-lawn", limit: 8, windowSeconds: 60, aiDailyLimit: 40 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const body = await req.json().catch(() => ({}));

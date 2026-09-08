@@ -1,16 +1,20 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Centralized weather sync. Fetches 14d Open-Meteo daily data, caches per (lat,lng,date)
 // in `weather_cache`. Returns the array.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 function round(n: number, p = 3) { return Math.round(n * 10 ** p) / 10 ** p; }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "weather-sync", limit: 60, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const { lat, lng, force } = await req.json();
     if (typeof lat !== "number" || typeof lng !== "number") {

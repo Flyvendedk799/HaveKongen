@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { rawHttpsGet, decodeText } from "../_shared/rawHttps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 function json(body: unknown, status = 200) {
@@ -26,6 +27,9 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number) {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "get-matrikel", limit: 120, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const token = Deno.env.get("DATAFORSYNINGEN_TOKEN");
     if (!token) return emptyFeatureCollection("DATAFORSYNINGEN_TOKEN not set");

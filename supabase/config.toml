@@ -30,6 +30,12 @@ verify_jwt = false
 [functions.plant-diagnose]
 verify_jwt = false
 
+# The payment provider calls this with its own signature, not a Supabase JWT.
+# Authenticity is established by verifying STRIPE_WEBHOOK_SECRET inside the
+# function, which refuses every request when that secret is missing.
+[functions.payment-webhook]
+verify_jwt = false
+
 # --- Local self-hosted (ServerHoster) Supabase ports ---
 # Cloud ignores these; they only apply to a local `supabase start`. Defaults
 # (543xx) collide with an ssh tunnel on this host, so we use a free 554xx range.

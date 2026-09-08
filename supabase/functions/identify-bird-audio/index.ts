@@ -1,12 +1,16 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Identify birds from a garden audio recording using OpenAI audio input.
 // Returns: { birds: [{ name_da, latin?, confidence, sound_type?, reason? }], summary }
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "identify-bird-audio", requireAuth: true, limit: 10, windowSeconds: 60, aiDailyLimit: 40 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const { audio, format, durationSeconds, context } = await req.json();

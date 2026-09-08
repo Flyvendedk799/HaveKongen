@@ -1,3 +1,4 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Plant photo diagnosis using Lovable AI Gateway (Gemini vision).
 // Returns structured JSON: diagnosis, severity, treatment, product_suggestions.
 // Persists to plant_health_log when user is authenticated.
@@ -5,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const SYSTEM = `Du er en dansk planteekspert. Brugeren uploader et billede af en plante eller et planteproblem.
@@ -25,6 +26,9 @@ Schema:
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "plant-diagnose", limit: 10, windowSeconds: 60, aiDailyLimit: 30 });
+  if (isBlocked(guarded)) return guarded.response;
   try {
     const { imageDataUrl, note, context } = await req.json();
     if (!imageDataUrl || typeof imageDataUrl !== "string") {

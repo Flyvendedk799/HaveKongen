@@ -1,8 +1,9 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 import { rawHttpsGet } from "../_shared/rawHttps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 const TILE_HEADERS = {
@@ -45,6 +46,9 @@ function tileSize(value: string | null): number {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "ortofoto-tile", limit: 1200, windowSeconds: 60, skipIdentity: true });
+  if (isBlocked(guarded)) return guarded.response;
 
   const token = Deno.env.get("DATAFORSYNINGEN_TOKEN");
   if (!token) return blankTile(200);

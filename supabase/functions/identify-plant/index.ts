@@ -1,12 +1,16 @@
+import { guard, isBlocked } from "../_shared/http.ts";
 // Identify a plant from a photo using Lovable AI (Gemini vision).
 // Returns: { name_da, latin?, category?, confidence, candidate_slugs[], care_tip }
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-havekongen-anon",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const guarded = await guard(req, { fn: "identify-plant", requireAuth: true, limit: 20, windowSeconds: 60, aiDailyLimit: 60 });
+  if (isBlocked(guarded)) return guarded.response;
 
   try {
     const { image, catalog, context } = await req.json();
