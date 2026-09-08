@@ -36,16 +36,61 @@ export default function AdminOrderDetail() {
 
   function update(k: string, v: any) { setOrder((p: any) => ({ ...p, [k]: v })); }
 
+  /**
+   * Status changes go through admin_update_order(), not a direct UPDATE.
+   * Writing to orders from the browser is revoked in v2 — the RPC is what
+   * validates the transition, restocks a cancellation, stamps the milestone
+   * timestamps, writes the audit event and notifies the customer.
+   */
   async function save() {
     setSaving(true);
-    const { error } = await supabase.from("orders").update({
-      status: order.status, shipping_status: order.shipping_status,
-      tracking_number: order.tracking_number, notes: order.notes,
-      refunded_at: order.status === "refunded" ? (order.refunded_at ?? new Date().toISOString()) : null,
-    }).eq("id", order.id);
-    setSaving(false);
-    if (error) return toast.error(error.message);
-    toast.success("Gemt");
+    try {
+      const { data, error } = await supabase.rpc("admin_update_order", {
+        p_order_id: order.id,
+        p_status: order.status,
+        p_shipping_status: order.shipping_status,
+        p_tracking_number: order.tracking_number || null,
+        p_note: order.notes || null,
+      });
+      if (error) throw new Error(error.message);
+
+      const result = data as unknown as { ok: boolean; message?: string };
+      if (!result?.ok) {
+        toast.error(result?.message ?? "Statusskiftet blev afvist.");
+        return;
+      }
+      toast.success("Gemt");
+      // Re-read: the RPC may have set timestamps and payment_status too.
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Kunne ikke gemme.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Bank transfers are confirmed by a human seeing the money arrive. */
+  async function markPaid() {
+    const reference = prompt("Betalingsreference (fx bankposteringstekst) — valgfri:") ?? "";
+    setSaving(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_mark_order_paid", {
+        p_order_id: order.id,
+        p_reference: reference.trim() || null,
+      });
+      if (error) throw new Error(error.message);
+      const result = data as unknown as { ok: boolean; error?: string };
+      if (!result?.ok) {
+        toast.error(result?.error ?? "Kunne ikke registrere betalingen.");
+        return;
+      }
+      toast.success("Betaling registreret");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Kunne ikke registrere betalingen.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!order) return <div className="p-6 text-muted-foreground">Indlæser…</div>;
@@ -134,6 +179,21 @@ export default function AdminOrderDetail() {
             <Label>Interne noter</Label>
             <Textarea rows={3} value={order.notes ?? ""} onChange={(e) => update("notes", e.target.value)} />
           </div>
+          {order.payment_status !== "paid" && order.status !== "cancelled" && (
+            <div className="md:col-span-2 flex items-center gap-3 rounded-md border border-dashed p-3">
+              <div className="flex-1 text-sm">
+                <div className="font-medium">Betaling ikke registreret</div>
+                <div className="text-muted-foreground">
+                  {order.payment_provider === "invoice"
+                    ? "Bankoverførsel — markér som betalt, når beløbet er på kontoen."
+                    : `Metode: ${order.payment_provider ?? "ukendt"}`}
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={markPaid} disabled={saving}>
+                Markér som betalt
+              </Button>
+            </div>
+          )}
           {order.refunded_at && (
             <div className="md:col-span-2 text-sm text-destructive">
               Refunderet {new Date(order.refunded_at).toLocaleString("da-DK")}
