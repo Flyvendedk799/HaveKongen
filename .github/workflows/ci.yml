@@ -35,6 +35,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Edge functions are Deno with remote imports, so neither tsc nor the
+      # app's ESLint pass compiles them. Without this a syntax error only
+      # surfaces as a 503 BOOT_ERROR in production.
+      - name: Check edge functions parse
+        run: npm run check:functions
+
       - name: Test
         run: npm run test
 

@@ -47,7 +47,7 @@ function tileSize(value: string | null): number {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const guarded = await guard(req, { fn: "ortofoto-tile", limit: 1200, windowSeconds: 60, skipIdentity: true });
+  const guarded = await guard(req, { fn: "ortofoto-tile", limit: 3000, windowSeconds: 60, skipIdentity: true });
   if (isBlocked(guarded)) return guarded.response;
 
   const token = Deno.env.get("DATAFORSYNINGEN_TOKEN");
