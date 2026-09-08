@@ -20,19 +20,24 @@ comment on column public.products.mower_specs is
 -- Either absent, or complete enough to judge a garden against. A half-filled
 -- spec would silently drop the product out of the recommendations, which is
 -- worse than a loud failure.
-do $$ begin
-  alter table public.products add constraint products_mower_specs_shape check (
-    mower_specs is null or (
-      jsonb_typeof(mower_specs) = 'object'
-      and jsonb_typeof(mower_specs -> 'maxAreaM2') = 'number'
-      and jsonb_typeof(mower_specs -> 'maxSlopePct') = 'number'
-      and jsonb_typeof(mower_specs -> 'minPassageCm') = 'number'
-      and (mower_specs -> 'maxAreaM2')::numeric > 0
-      and (mower_specs -> 'maxSlopePct')::numeric between 0 and 100
-      and (mower_specs -> 'minPassageCm')::numeric between 10 and 200
-    )
-  );
-exception when duplicate_object then null; end $$;
+--
+-- Every key test is wrapped in coalesce() on purpose. A CHECK constraint passes
+-- when its expression evaluates to NULL rather than false, and jsonb_typeof()
+-- of a *missing* key returns NULL — so the obvious spelling of this constraint
+-- accepts exactly the incomplete specs it was written to reject.
+alter table public.products drop constraint if exists products_mower_specs_shape;
+
+alter table public.products add constraint products_mower_specs_shape check (
+  mower_specs is null or (
+    jsonb_typeof(mower_specs) = 'object'
+    and coalesce(jsonb_typeof(mower_specs -> 'maxAreaM2'), '') = 'number'
+    and coalesce(jsonb_typeof(mower_specs -> 'maxSlopePct'), '') = 'number'
+    and coalesce(jsonb_typeof(mower_specs -> 'minPassageCm'), '') = 'number'
+    and (mower_specs ->> 'maxAreaM2')::numeric > 0
+    and (mower_specs ->> 'maxSlopePct')::numeric between 0 and 100
+    and (mower_specs ->> 'minPassageCm')::numeric between 10 and 200
+  )
+);
 
 -- The recommendation query filters on this; it is a small table but the partial
 -- index keeps it honest as the catalogue grows.
