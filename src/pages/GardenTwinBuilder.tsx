@@ -32,6 +32,7 @@ import { useAuth } from "@/lib/auth";
 import { useActiveGarden } from "@/lib/activeGarden";
 import { MAP_GLYPHS, ORTOFOTO_ATTRIBUTION, ortofotoTileTemplate } from "@/lib/ortofoto";
 import GardenTwinViewer from "@/components/havemaaler/GardenTwinViewer";
+import { MowerRecommendation } from "@/components/havemaaler/MowerRecommendation";
 import {
   buildGardenTwinModel,
   coerceGardenDepthModel,
@@ -1058,16 +1059,18 @@ export default function GardenTwinBuilder() {
               <span className="num"><Check size={12} /></span> Græsflade
             </Link>
             <span className="builder-step-arrow" aria-hidden>→</span>
-            <span className="builder-step is-active"><span className="num">2</span> Byg i 3D</span>
+            <span className="builder-step is-active"><span className="num">2</span> Forhindringer</span>
             <span className="builder-step-arrow" aria-hidden>→</span>
             <span className={`builder-step ${stepSaved ? "is-done" : ""}`}>
-              <span className="num">{stepSaved ? <Check size={12} /> : 3}</span> Gem &amp; brug
+              <span className="num">{stepSaved ? <Check size={12} /> : 3}</span> Find robotklipper
             </span>
           </nav>
-          <h1>Byg din 3D-have.</h1>
+          {/* The step is named for what the user gets, not for the 3D model it
+              happens to build on the way there. */}
+          <h1>Hvad står der i vejen?</h1>
           <p className="lede">
-            Vi finder træer, hække og skure automatisk i Danmarks Højdemodel — du godkender dem med ét klik.
-            Tegn selv hække og hegn fra ende til ende, og se haven i 3D med rigtigt terræn.
+            Vi finder træer, bede og skure i Danmarks Højdemodel — godkend dem med ét klik.
+            Sammen med terrænets fald afgør de, hvilken robotklipper der kan klare din have.
           </p>
         </header>
 
@@ -1191,13 +1194,10 @@ export default function GardenTwinBuilder() {
               </div>
 
               <aside className="recommendation">
-                <div className="eyebrow" style={{ marginBottom: 14 }}>3D Garden Twin</div>
-
-                <div className="garden-scan-panel__metrics" style={{ marginBottom: 16 }}>
-                  <div><Layers3 size={14} /><strong>{objects.length}</strong><span>objekter</span></div>
-                  <div><Mountain size={14} /><strong>{elevation ? `${elevation.stats.reliefM.toFixed(1)}m` : "—"}</strong><span>terrænfald</span></div>
-                  <div><Ruler size={14} /><strong>{model.quality.score}</strong><span>/100 kvalitet</span></div>
-                </div>
+                {/* The recommendation sits at the top and recomputes on every
+                    change, so accepting one more tree visibly sharpens the
+                    answer instead of only adding to a 3D render. */}
+                <MowerRecommendation model={model} />
 
                 {suggestions.length > 0 && (
                   <div className="suggestion-panel">
