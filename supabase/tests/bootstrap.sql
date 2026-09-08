@@ -62,6 +62,18 @@ $fn$;
 grant usage on schema auth to anon, authenticated, service_role;
 grant select on auth.users to authenticated, service_role;
 
+-- --------------------------------------------------------------- realtime --
+
+-- Migrations do `alter publication supabase_realtime add table …` to stream
+-- changes to subscribed clients. The publication is created by the Supabase
+-- platform; here an empty one is enough for those statements to succeed.
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end $$;
+
 -- ----------------------------------------------------------------- storage --
 
 create schema if not exists storage;
