@@ -63,6 +63,13 @@ export const OBJECT_SPECS: Record<BuilderObjectType, ObjectSpec> = {
 };
 
 /** Palette order for the builder toolbar — most common first. */
+/**
+ * The obstacles that turn up in almost every Danish garden. Shown first so
+ * placing something common is one click rather than a hunt through eleven
+ * equally-weighted buttons.
+ */
+export const COMMON_TYPES: BuilderObjectType[] = ["tree", "hedge", "bed", "shed", "patio"];
+
 export const BUILDER_PALETTE: BuilderObjectType[] = [
   "tree", "hedge", "shed", "patio", "bed", "fence", "water", "furniture", "steps", "retaining_wall", "unknown_obstacle",
 ];
