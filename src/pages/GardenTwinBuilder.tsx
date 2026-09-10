@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -15,7 +15,6 @@ import {
   Mountain,
   PenLine,
   Redo2,
-  RotateCw,
   Ruler,
   Save,
   Sparkles,
@@ -68,6 +67,7 @@ import {
   metersBetween,
   nudgeObject,
   placedFromSuggestion,
+  rectFromCorners,
   placedObjectFootprint,
   segmentRotationDeg,
   suggestionFootprint,
@@ -170,6 +170,7 @@ export default function GardenTwinBuilder() {
 
   const mapRef = useRef<maplibregl.Map | null>(null);
   const mapPaneRef = useRef<HTMLDivElement | null>(null);
+  const placeDragRef = useRef<{ start: LngLat; current?: LngLat; sized: boolean } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<string | null>(null);
   // Active transform-handle drag (resize/rotate/endpoint) on the selected object.
@@ -382,6 +383,9 @@ export default function GardenTwinBuilder() {
       if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 70, maxZoom: 20.2, duration: 0 });
     });
     map.on("click", onMapClick);
+    // Placing a point object is a press-drag-release, so it has to be caught
+    // before the layer handlers below claim the press.
+    map.on("mousedown", onPlacePointerDown);
     // Handle listeners are registered before the object listeners so a grab on
     // a handle that overlaps the footprint wins.
     map.on("mousedown", "handle-pt", onHandlePointerDown);
@@ -392,8 +396,8 @@ export default function GardenTwinBuilder() {
     map.on("touchstart", "obj-foot-fill", onObjectPointerDown);
     map.on("mousemove", onMapMouseMove);
     map.on("touchmove", onMapTouchMove);
-    map.on("mouseup", endDrag);
-    map.on("touchend", endDrag);
+    map.on("mouseup", () => { endPlaceDrag(); endDrag(); });
+    map.on("touchend", () => { endPlaceDrag(); endDrag(); });
     map.on("touchcancel", endDrag);
     map.on("mouseout", () => updateGhost(null));
     const canvas = map.getCanvas();
@@ -515,7 +519,25 @@ export default function GardenTwinBuilder() {
       map.addSource("ghost", { type: "geojson", data: empty });
       map.addLayer({ id: "ghost-fill", type: "fill", source: "ghost", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": ["get", "color"], "fill-opacity": 0.22 } });
       map.addLayer({ id: "ghost-line", type: "line", source: "ghost", filter: ["any", ["==", ["geometry-type"], "Polygon"], ["==", ["geometry-type"], "LineString"]], paint: { "line-color": "#edc88b", "line-width": 1.8, "line-dasharray": [1.6, 1.4] } });
-      map.addLayer({ id: "ghost-pt", type: "circle", source: "ghost", filter: ["==", ["geometry-type"], "Point"], paint: { "circle-radius": 5, "circle-color": "#edc88b", "circle-stroke-color": "#14271d", "circle-stroke-width": 1.5 } });
+      map.addLayer({ id: "ghost-pt", type: "circle", source: "ghost", filter: ["all", ["==", ["geometry-type"], "Point"], ["!", ["has", "label"]]], paint: { "circle-radius": 5, "circle-color": "#edc88b", "circle-stroke-color": "#14271d", "circle-stroke-width": 1.5 } });
+      // Live size readout while placing. Without it you are dragging out a
+      // rectangle with no idea how big it is, which is most of what made
+      // placing feel like guesswork.
+      map.addLayer({
+        id: "ghost-label",
+        type: "symbol",
+        source: "ghost",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["has", "label"]],
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 13,
+          "text-offset": [0, -1.2],
+          "text-anchor": "bottom",
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+        },
+        paint: { "text-color": "#14271d", "text-halo-color": "#f5f2eb", "text-halo-width": 2 },
+      });
     }
   }
 
@@ -560,6 +582,11 @@ export default function GardenTwinBuilder() {
   void historyTick;
 
   // ----- Ghost preview -----
+  /** Danish decimal comma, one place — "3,2" not "3.20". */
+  function formatMeters(value: number): string {
+    return value.toFixed(1).replace(".", ",");
+  }
+
   function updateGhost(cursor: LngLat | null) {
     const map = mapRef.current;
     if (!map || !map.getSource("ghost")) return;
@@ -575,12 +602,26 @@ export default function GardenTwinBuilder() {
           const ring = makeFootprint(mid, lengthM, spec.depthM, segmentRotationDeg(s.lineStart, cursor));
           features.push({ type: "Feature", properties: { color: spec.color }, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] } });
           features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [s.lineStart, cursor] } });
+          features.push({ type: "Feature", properties: { label: `${formatMeters(lengthM)} m` }, geometry: { type: "Point", coordinates: mid } });
         } else {
           features.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: cursor } });
         }
       } else {
-        const ring = makeFootprint(cursor, spec.widthM, spec.depthM, 0);
+        // While dragging, the ghost is the rectangle being drawn; otherwise it
+        // is the default footprint following the cursor.
+        const drag = placeDragRef.current;
+        const rect = drag?.sized && drag.current ? rectFromCorners(drag.start, drag.current) : null;
+        const ring = rect
+          ? makeFootprint(rect.center, rect.widthM, rect.depthM, 0)
+          : makeFootprint(cursor, spec.widthM, spec.depthM, 0);
         features.push({ type: "Feature", properties: { color: spec.color }, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] } });
+        if (rect) {
+          features.push({
+            type: "Feature",
+            properties: { label: `${formatMeters(rect.widthM)} × ${formatMeters(rect.depthM)} m` },
+            geometry: { type: "Point", coordinates: rect.center },
+          });
+        }
       }
     }
     if (s.lineStart && s.placingType) {
@@ -685,6 +726,45 @@ export default function GardenTwinBuilder() {
     setObjects((prev) => prev.map((object) => object.id === id ? { ...object, center: ll } : object));
   }
 
+  /**
+   * Start placing a point object.
+   *
+   * Press-drag-release draws the object at the size you want; a plain click
+   * still drops it at its default size. Before this you always got the default
+   * and then had to go and correct it with sliders, which is what made placing
+   * anything feel like a chore.
+   */
+  function onPlacePointerDown(e: maplibregl.MapMouseEvent) {
+    const s = stateRef.current;
+    if (!s.placingType || OBJECT_SPECS[s.placingType].placement === "line") return;
+    if (draggingRef.current || transformRef.current) return;
+    const map = mapRef.current!;
+    placeDragRef.current = { start: [e.lngLat.lng, e.lngLat.lat], sized: false };
+    map.dragPan.disable();
+    e.preventDefault();
+  }
+
+  /** Finish a press-drag-release placement. */
+  function endPlaceDrag() {
+    const drag = placeDragRef.current;
+    const type = stateRef.current.placingType;
+    placeDragRef.current = null;
+    if (!drag || !type) return;
+
+    const map = mapRef.current;
+    map?.dragPan.enable();
+
+    if (drag.sized && drag.current) {
+      const { widthM, depthM, center } = rectFromCorners(drag.start, drag.current);
+      placeObject(type, center, { widthM, depthM });
+    } else {
+      placeObject(type, drag.start);
+    }
+    // The release also fires a click; that would place a second object.
+    suppressClickRef.current = true;
+    window.setTimeout(() => { suppressClickRef.current = false; }, 150);
+  }
+
   function onMapMouseMove(e: maplibregl.MapMouseEvent) {
     const ll: LngLat = [e.lngLat.lng, e.lngLat.lat];
     if (transformRef.current) {
@@ -694,6 +774,17 @@ export default function GardenTwinBuilder() {
     const id = draggingRef.current;
     if (id) {
       moveDragged(id, ll);
+      return;
+    }
+    const drag = placeDragRef.current;
+    if (drag) {
+      // Ignore the first pixel or two so a slightly shaky click still counts as
+      // a click rather than producing a 20 cm object.
+      if (metersBetween(drag.start, ll) > 0.6) {
+        drag.sized = true;
+        drag.current = ll;
+      }
+      updateGhost(ll);
       return;
     }
     if (stateRef.current.placingType) updateGhost(ll);
@@ -729,8 +820,8 @@ export default function GardenTwinBuilder() {
     setHandleTick((t) => t + 1); // re-sync so the live dimension label disappears
   }
 
-  function placeObject(type: BuilderObjectType, ll: LngLat) {
-    const created = createPlacedObject(type, ll);
+  function placeObject(type: BuilderObjectType, ll: LngLat, size?: { widthM: number; depthM: number }) {
+    const created = createPlacedObject(type, ll, size);
     let next = created;
     const field = elevationRef.current;
     if (field && OBJECT_SPECS[type].measurable) {
@@ -960,8 +1051,8 @@ export default function GardenTwinBuilder() {
   }, [dirty]);
 
   // ----- Editor actions -----
-  // Slider edits mutate in place; one history snapshot is taken when a slider is
-  // grabbed (beginEdit) so a whole drag is a single undo step.
+  // Callers snapshot() before patching so a field edit or a handle drag is a
+  // single undo step rather than one per intermediate value.
   function patchSelected(patch: Partial<PlacedObject>) {
     if (!selectedId) return;
     setObjects((prev) => prev.map((object) => object.id === selectedId ? updatePlacedObject(object, patch) : object));
@@ -1320,10 +1411,42 @@ export default function GardenTwinBuilder() {
                     </div>
                     <p style={{ fontSize: 11, color: "var(--ink-500)", margin: "4px 0 12px" }}>{OBJECT_SPECS[selected.type].hint}</p>
 
-                    <SliderRow label={`Højde · ${selected.heightM.toFixed(1)} m`} min={OBJECT_SPECS[selected.type].heightRange[0]} max={OBJECT_SPECS[selected.type].heightRange[1]} step={0.1} value={selected.heightM} onChange={(v) => patchSelected({ heightM: Number(v.toFixed(2)) })} onEditStart={snapshot} />
-                    <SliderRow label={`${OBJECT_SPECS[selected.type].placement === "line" ? "Længde" : "Bredde"} · ${selected.widthM.toFixed(1)} m`} min={0.3} max={OBJECT_SPECS[selected.type].placement === "line" ? 40 : 20} step={0.1} value={selected.widthM} onChange={(v) => patchSelected({ widthM: Number(v.toFixed(2)) })} onEditStart={snapshot} />
-                    <SliderRow label={`${OBJECT_SPECS[selected.type].placement === "line" ? "Bredde" : "Dybde"} · ${selected.depthM.toFixed(1)} m`} min={0.1} max={20} step={0.1} value={selected.depthM} onChange={(v) => patchSelected({ depthM: Number(v.toFixed(2)) })} onEditStart={snapshot} />
-                    <SliderRow label={`Drejning · ${Math.round(selected.rotationDeg)}°`} min={0} max={180} step={1} value={selected.rotationDeg} onChange={(v) => patchSelected({ rotationDeg: v })} onEditStart={snapshot} icon={<RotateCw size={12} />} />
+                    {/* Numbers, not sliders. A hedge is "6,5 m long" — a value
+                        you know and can type. Dragging a range input to hit it
+                        was the slowest possible way to say so, and the on-map
+                        handles already cover the case where you'd rather drag. */}
+                    <div className="dim-grid">
+                      <DimField
+                        label={OBJECT_SPECS[selected.type].placement === "line" ? "Længde" : "Bredde"}
+                        value={selected.widthM}
+                        min={0.3}
+                        max={80}
+                        onCommit={(v) => { snapshot(); patchSelected({ widthM: v }); }}
+                      />
+                      <DimField
+                        label={OBJECT_SPECS[selected.type].placement === "line" ? "Tykkelse" : "Dybde"}
+                        value={selected.depthM}
+                        min={0.1}
+                        max={40}
+                        onCommit={(v) => { snapshot(); patchSelected({ depthM: v }); }}
+                      />
+                      <DimField
+                        label="Højde"
+                        value={selected.heightM}
+                        min={OBJECT_SPECS[selected.type].heightRange[0]}
+                        max={OBJECT_SPECS[selected.type].heightRange[1]}
+                        onCommit={(v) => { snapshot(); patchSelected({ heightM: v, heightSource: "user" }); }}
+                      />
+                      <DimField
+                        label="Drejning"
+                        unit="°"
+                        step={1}
+                        value={Math.round(selected.rotationDeg)}
+                        min={0}
+                        max={180}
+                        onCommit={(v) => { snapshot(); patchSelected({ rotationDeg: v }); }}
+                      />
+                    </div>
 
                     <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                       {OBJECT_SPECS[selected.type].measurable && elevation && (
@@ -1416,11 +1539,72 @@ export default function GardenTwinBuilder() {
   );
 }
 
-function SliderRow({ label, min, max, step, value, onChange, onEditStart, icon }: { label: string; min: number; max: number; step: number; value: number; onChange: (value: number) => void; onEditStart?: () => void; icon?: ReactNode }) {
+/**
+ * A dimension in metres (or degrees), typed rather than dragged.
+ *
+ * Holds its own draft text so a half-typed "1." or an empty field does not
+ * immediately clamp to the minimum under the user's cursor; the value is
+ * committed on blur or Enter, and Escape restores what was there. Arrow keys
+ * step it, which is the one thing a slider was actually good for.
+ */
+function DimField({
+  label,
+  value,
+  min,
+  max,
+  step = 0.1,
+  unit = "m",
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  unit?: string;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? String(Number(value.toFixed(2)));
+
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+
+  const commit = (raw: string) => {
+    setDraft(null);
+    // Danish keyboards produce a comma; accept both.
+    const parsed = Number(raw.replace(",", "."));
+    if (!Number.isFinite(parsed)) return;
+    const next = Number(clamp(parsed).toFixed(2));
+    if (next !== Number(value.toFixed(2))) onCommit(next);
+  };
+
   return (
-    <label style={{ display: "block", margin: "10px 0" }}>
-      <span style={{ fontSize: 11, color: "var(--ink-600, var(--ink-500))", display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>{icon}{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value} onPointerDown={onEditStart} onKeyDown={onEditStart} onChange={(e) => onChange(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--gold)" }} />
+    <label className="dim-field">
+      <span>{label}</span>
+      <span className="dim-input">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={shown}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit((e.target as HTMLInputElement).value);
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === "Escape") {
+              setDraft(null);
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault();
+              const delta = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? step * 10 : step);
+              onCommit(Number(clamp(value + delta).toFixed(2)));
+              setDraft(null);
+            }
+          }}
+        />
+        <em>{unit}</em>
+      </span>
     </label>
   );
 }

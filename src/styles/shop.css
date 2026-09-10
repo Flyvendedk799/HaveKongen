@@ -1028,3 +1028,50 @@
 }
 .builder-placing-hint button:hover { color: var(--ink-900); }
 .builder-palette-more { opacity: 0.75; }
+
+/* ─────────────────────────────────── builder dimension fields ─────────────
+   Replaced four range sliders. A hedge is "6,5 m long" — a number you know,
+   not something to hunt for by dragging. */
+.dim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 10px 0;
+}
+.dim-field { display: block; }
+.dim-field > span:first-child {
+  display: block;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-500);
+  margin-bottom: 3px;
+}
+.dim-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(20, 39, 29, 0.16);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: var(--paper);
+  height: 32px;
+}
+.dim-input:focus-within { border-color: var(--forest-600); }
+.dim-input input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+  padding: 0;
+}
+.dim-input input:focus { outline: none; }
+.dim-input em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-500);
+}
