@@ -12,6 +12,7 @@ import {
   objectLocalToLngLat,
   placedFromSuggestion,
   placedObjectFootprint,
+  rectFromCorners,
   segmentRotationDeg,
   suggestionsFromDetections,
   transformHandlesFor,
@@ -248,5 +249,57 @@ describe("transform handles", () => {
     expect(dragged.rotationDeg).toBe(90);
     const endAAfter = transformHandlesFor(dragged).find((h) => h.kind === "end-a")!;
     expect(metersBetween(anchor, endAAfter.lngLat)).toBeLessThan(0.05);
+  });
+});
+
+describe("drag-to-size placement", () => {
+  // Placing used to drop an object at a fixed default size, which then had to be
+  // corrected with sliders. Dragging out the extent is the whole fix, so the
+  // corner maths is worth pinning down.
+  it("measures a dragged rectangle in metres", () => {
+    // A 10 × 6 m footprint has opposite corners exactly 10 m and 6 m apart, so
+    // dragging between them must reproduce those dimensions.
+    const ring = makeFootprint(center, 10, 6, 0);
+    const rect = rectFromCorners(ring[0], ring[2]);
+
+    expect(rect.widthM).toBeCloseTo(10, 1);
+    expect(rect.depthM).toBeCloseTo(6, 1);
+  });
+
+  it("centres the object between the two dragged corners", () => {
+    const a: [number, number] = [12.0, 55.0];
+    const b: [number, number] = [12.001, 55.001];
+    const rect = rectFromCorners(a, b);
+    expect(rect.center[0]).toBeCloseTo(12.0005, 6);
+    expect(rect.center[1]).toBeCloseTo(55.0005, 6);
+  });
+
+  it("is direction-agnostic — dragging up-left is the same rectangle as down-right", () => {
+    const a: [number, number] = [12.0, 55.0];
+    const b: [number, number] = [12.001, 55.001];
+    const forward = rectFromCorners(a, b);
+    const backward = rectFromCorners(b, a);
+    expect(backward.widthM).toBeCloseTo(forward.widthM, 6);
+    expect(backward.depthM).toBeCloseTo(forward.depthM, 6);
+    expect(backward.center).toEqual(forward.center);
+  });
+
+  it("never produces a zero-area object", () => {
+    // A drag that barely moved would otherwise create a footprint the twin
+    // builder silently discards (it drops rings with no area).
+    const rect = rectFromCorners([12, 55], [12, 55]);
+    expect(rect.widthM).toBeGreaterThan(0);
+    expect(rect.depthM).toBeGreaterThan(0);
+
+    const ring = makeFootprint(rect.center, rect.widthM, rect.depthM, 0);
+    expect(turf.area(turf.polygon([[...ring, ring[0]]]))).toBeGreaterThan(0);
+  });
+
+  it("produces a footprint the model will accept", () => {
+    const rect = rectFromCorners([12, 55], [12.0002, 55.0002]);
+    const object = createPlacedObject("shed", rect.center, { widthM: rect.widthM, depthM: rect.depthM });
+    const ring = placedObjectFootprint(object);
+    expect(ring.length).toBeGreaterThanOrEqual(3);
+    expect(turf.area(turf.polygon([[...ring, ring[0]]]))).toBeGreaterThan(0);
   });
 });

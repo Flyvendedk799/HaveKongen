@@ -89,6 +89,24 @@ export function metersBetween(a: LngLat, b: LngLat): number {
 }
 
 /**
+ * The axis-aligned rectangle spanned by two dragged corners, as a centre plus
+ * width and depth in metres. Used when placing an object by dragging its
+ * extent rather than dropping it at a default size.
+ */
+export function rectFromCorners(a: LngLat, b: LngLat): { center: LngLat; widthM: number; depthM: number } {
+  const midLat = (((a[1] + b[1]) / 2) * Math.PI) / 180;
+  const widthM = Math.abs(b[0] - a[0]) * METERS_PER_DEG * Math.cos(midLat);
+  const depthM = Math.abs(b[1] - a[1]) * METERS_PER_DEG;
+  return {
+    center: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+    // A degenerate drag would otherwise create an object with no area, which
+    // the twin builder then silently drops.
+    widthM: Math.max(0.3, Number(widthM.toFixed(2))),
+    depthM: Math.max(0.3, Number(depthM.toFixed(2))),
+  };
+}
+
+/**
  * Rotation (degrees, counter-clockwise from east — the same convention
  * makeFootprint uses) of the segment from `a` to `b`, normalized to [0, 180).
  */
