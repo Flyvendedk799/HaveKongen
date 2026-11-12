@@ -1,0 +1,47 @@
+# Runs on ServerHoster (in Docker on the VPS), not GitHub Actions.
+# Replaces .github/workflows/ci.yml: pushes to main and pull requests into main.
+# Both former jobs (verify + migrations) run here, one after the other.
+image: node:20-bookworm
+timeoutMinutes: 20
+memoryMb: 3072
+cpus: 2
+steps:
+  - name: Install
+    run: npm ci
+  - name: Typecheck
+    run: npm run typecheck
+  - name: Lint
+    run: npm run lint
+  # Edge functions are Deno with remote imports, so neither tsc nor ESLint
+  # compiles them. Without this a syntax error only shows up as a 503 in production.
+  - name: Check edge functions parse
+    run: npm run check:functions
+  - name: Test
+    run: npm run test
+  # Vite inlines these at build time; placeholders prove the bundle compiles.
+  - name: Build
+    run: >-
+      VITE_SUPABASE_URL=https://example.supabase.co
+      VITE_SUPABASE_PUBLISHABLE_KEY=ci-placeholder-key
+      VITE_SUPABASE_PROJECT_ID=ci
+      npm run build
+  # A real Postgres 15 inside the job (no service containers here), so the
+  # PL/pgSQL function bodies are compiled before production.
+  - name: Start Postgres
+    run: .survhub/services.sh postgres=15 pguser=postgres pgpassword=postgres pgdb=havekongen_test
+  - name: Prepare a Supabase-shaped database
+    run: >-
+      . /tmp/ci-services.env && PGPASSWORD=postgres
+      psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql
+  - name: Apply every migration in order
+    run: |
+      . /tmp/ci-services.env
+      export PGPASSWORD=postgres
+      for f in supabase/migrations/*.sql; do
+        echo "── $f"
+        psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -q -f "$f" || exit 1
+      done
+  - name: Check the pricing engine against known baskets
+    run: >-
+      . /tmp/ci-services.env && PGPASSWORD=postgres
+      psql -h localhost -U postgres -d havekongen_test -v ON_ERROR_STOP=1 -f supabase/tests/pricing_test.sql
